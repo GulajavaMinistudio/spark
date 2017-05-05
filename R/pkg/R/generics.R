@@ -576,6 +576,10 @@ setGeneric("group_by", function(x, ...) { standardGeneric("group_by") })
 #' @export
 setGeneric("groupBy", function(x, ...) { standardGeneric("groupBy") })
 
+#' @rdname hint
+#' @export
+setGeneric("hint", function(x, name, ...) { standardGeneric("hint") })
+
 #' @rdname insertInto
 #' @export
 setGeneric("insertInto", function(x, tableName, ...) { standardGeneric("insertInto") })
@@ -1075,6 +1079,12 @@ setGeneric("hypot", function(y, x) { standardGeneric("hypot") })
 #' @rdname initcap
 #' @export
 setGeneric("initcap", function(x) { standardGeneric("initcap") })
+
+#' @param x empty. Should be used with no argument.
+#' @rdname input_file_name
+#' @export
+setGeneric("input_file_name",
+           function(x = "missing") { standardGeneric("input_file_name") })
 
 #' @rdname instr
 #' @export
