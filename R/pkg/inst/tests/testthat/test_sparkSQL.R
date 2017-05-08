@@ -1223,6 +1223,16 @@ test_that("select with column", {
   expect_equal(columns(df4), c("name", "age"))
   expect_equal(count(df4), 3)
 
+  # Test select with alias
+  df5 <- alias(df, "table")
+
+  expect_equal(columns(select(df5, column("table.name"))), "name")
+  expect_equal(columns(select(df5, "table.name")), "name")
+
+  # Test that stats::alias is not masked
+  expect_is(alias(aov(yield ~ block + N * P * K, npk)), "listof")
+
+
   expect_error(select(df, c("name", "age"), "name"),
                 "To select multiple columns, use a character vector or list for col")
 })
@@ -3387,7 +3397,7 @@ compare_list <- function(list1, list2) {
 
 # This should always be the **very last test** in this test file.
 test_that("No extra files are created in SPARK_HOME by starting session and making calls", {
-  skip_on_cran()
+  skip_on_cran() # skip because when run from R CMD check SPARK_HOME is not the current directory
 
   # Check that it is not creating any extra file.
   # Does not check the tempdir which would be cleaned up after.
