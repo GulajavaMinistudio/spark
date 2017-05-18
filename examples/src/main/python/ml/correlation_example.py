@@ -17,31 +17,35 @@
 
 from __future__ import print_function
 
-import sys
-from random import random
-from operator import add
-
+# $example on$
+from pyspark.ml.linalg import Vectors
+from pyspark.ml.stat import Correlation
+# $example off$
 from pyspark.sql import SparkSession
 
-
+"""
+An example for computing correlation matrix.
+Run with:
+  bin/spark-submit examples/src/main/python/ml/correlation_example.py
+"""
 if __name__ == "__main__":
-    """
-        Usage: pi [partitions]
-    """
-    spark = SparkSession\
-        .builder\
-        .appName("PythonPi")\
+    spark = SparkSession \
+        .builder \
+        .appName("CorrelationExample") \
         .getOrCreate()
 
-    partitions = int(sys.argv[1]) if len(sys.argv) > 1 else 2
-    n = 100000 * partitions
+    # $example on$
+    data = [(Vectors.sparse(4, [(0, 1.0), (3, -2.0)]),),
+            (Vectors.dense([4.0, 5.0, 0.0, 3.0]),),
+            (Vectors.dense([6.0, 7.0, 0.0, 8.0]),),
+            (Vectors.sparse(4, [(0, 9.0), (3, 1.0)]),)]
+    df = spark.createDataFrame(data, ["features"])
 
-    def f(_):
-        x = random() * 2 - 1
-        y = random() * 2 - 1
-        return 1 if x ** 2 + y ** 2 <= 1 else 0
+    r1 = Correlation.corr(df, "features").head()
+    print("Pearson correlation matrix:\n" + str(r1[0]))
 
-    count = spark.sparkContext.parallelize(range(1, n + 1), partitions).map(f).reduce(add)
-    print("Pi is roughly %f" % (4.0 * count / n))
+    r2 = Correlation.corr(df, "features", "spearman").head()
+    print("Spearman correlation matrix:\n" + str(r2[0]))
+    # $example off$
 
     spark.stop()
