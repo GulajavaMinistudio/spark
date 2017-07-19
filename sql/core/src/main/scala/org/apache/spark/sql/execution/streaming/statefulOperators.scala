@@ -87,8 +87,7 @@ trait StateStoreWriter extends StatefulOperator { self: SparkPlan =>
     new StateOperatorProgress(
       numRowsTotal = longMetric("numTotalStateRows").value,
       numRowsUpdated = longMetric("numUpdatedStateRows").value,
-      memoryUsedBytes = longMetric("stateMemory").value,
-      numPartitions = this.sqlContext.conf.numShufflePartitions)
+      memoryUsedBytes = longMetric("stateMemory").value)
   }
 
   /** Records the duration of running `body` for the next query progress update. */
@@ -104,7 +103,6 @@ trait StateStoreWriter extends StatefulOperator { self: SparkPlan =>
    * This should be called in that task after the store has been updated.
    */
   protected def setStoreMetrics(store: StateStore): Unit = {
-
     val storeMetrics = store.metrics
     longMetric("numTotalStateRows") += storeMetrics.numKeys
     longMetric("stateMemory") += storeMetrics.memoryUsedBytes
@@ -115,8 +113,12 @@ trait StateStoreWriter extends StatefulOperator { self: SparkPlan =>
 
   private def stateStoreCustomMetrics: Map[String, SQLMetric] = {
     val provider = StateStoreProvider.create(sqlContext.conf.stateStoreProviderClass)
-    provider.supportedCustomMetrics.map { m =>
-      m.name -> SQLMetrics.createTimingMetric(sparkContext, m.desc) }.toMap
+    provider.supportedCustomMetrics.map {
+      case StateStoreCustomSizeMetric(name, desc) =>
+        name -> SQLMetrics.createSizeMetric(sparkContext, desc)
+      case StateStoreCustomTimingMetric(name, desc) =>
+        name -> SQLMetrics.createTimingMetric(sparkContext, desc)
+    }.toMap
   }
 }
 

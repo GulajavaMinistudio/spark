@@ -270,7 +270,7 @@ private[spark] class ApplicationMaster(
             val credentialManager = new YARNHadoopDelegationTokenManager(
               sparkConf,
               yarnConf,
-              YarnSparkHadoopUtil.get.hadoopFSsToAccess(sparkConf, yarnConf))
+              conf => YarnSparkHadoopUtil.get.hadoopFSsToAccess(sparkConf, conf))
 
             val credentialRenewer =
               new AMCredentialRenewer(sparkConf, yarnConf, credentialManager)
@@ -459,8 +459,10 @@ private[spark] class ApplicationMaster(
   }
 
   private def runExecutorLauncher(securityMgr: SecurityManager): Unit = {
-    rpcEnv = RpcEnv.create("sparkYarnAM", Utils.localHostName, -1, sparkConf, securityMgr,
-      clientMode = true)
+    val hostname = Utils.localHostName
+    val amCores = sparkConf.get(AM_CORES)
+    rpcEnv = RpcEnv.create("sparkYarnAM", hostname, hostname, -1, sparkConf, securityMgr,
+      amCores, true)
     val driverRef = waitForSparkDriver()
     addAmIpFilter()
     registerAM(sparkConf, rpcEnv, driverRef, sparkConf.getOption("spark.driver.appUIAddress"),
