@@ -157,7 +157,19 @@ class CodegenContext {
   val mutableStates: mutable.ArrayBuffer[(String, String, String)] =
     mutable.ArrayBuffer.empty[(String, String, String)]
 
-  def addMutableState(javaType: String, variableName: String, initCode: String): Unit = {
+  /**
+   * Add a mutable state as a field to the generated class. c.f. the comments above.
+   *
+   * @param javaType Java type of the field. Note that short names can be used for some types,
+   *                 e.g. InternalRow, UnsafeRow, UnsafeArrayData, etc. Other types will have to
+   *                 specify the fully-qualified Java type name. See the code in doCompile() for
+   *                 the list of default imports available.
+   *                 Also, generic type arguments are accepted but ignored.
+   * @param variableName Name of the field.
+   * @param initCode The statement(s) to put into the init() method to initialize this field.
+   *                 If left blank, the field will be default-initialized.
+   */
+  def addMutableState(javaType: String, variableName: String, initCode: String = ""): Unit = {
     mutableStates += ((javaType, variableName, initCode))
   }
 
@@ -191,7 +203,7 @@ class CodegenContext {
     val initCodes = mutableStates.distinct.map(_._3 + "\n")
     // The generated initialization code may exceed 64kb function size limit in JVM if there are too
     // many mutable states, so split it into multiple functions.
-    splitExpressions(initCodes, "init", Nil)
+    splitExpressions(expressions = initCodes, funcName = "init", arguments = Nil)
   }
 
   /**
@@ -769,7 +781,7 @@ class CodegenContext {
       // Cannot split these expressions because they are not created from a row object.
       return expressions.mkString("\n")
     }
-    splitExpressions(expressions, "apply", ("InternalRow", row) :: Nil)
+    splitExpressions(expressions, funcName = "apply", arguments = ("InternalRow", row) :: Nil)
   }
 
   /**
@@ -790,23 +802,7 @@ class CodegenContext {
       returnType: String = "void",
       makeSplitFunction: String => String = identity,
       foldFunctions: Seq[String] => String = _.mkString("", ";\n", ";")): String = {
-    val blocks = new ArrayBuffer[String]()
-    val blockBuilder = new StringBuilder()
-    var length = 0
-    for (code <- expressions) {
-      // We can't know how many bytecode will be generated, so use the length of source code
-      // as metric. A method should not go beyond 8K, otherwise it will not be JITted, should
-      // also not be too small, or it will have many function calls (for wide table), see the
-      // results in BenchmarkWideTable.
-      if (length > 1024) {
-        blocks += blockBuilder.toString()
-        blockBuilder.clear()
-        length = 0
-      }
-      blockBuilder.append(code)
-      length += CodeFormatter.stripExtraNewLinesAndComments(code).length
-    }
-    blocks += blockBuilder.toString()
+    val blocks = buildCodeBlocks(expressions)
 
     if (blocks.length == 1) {
       // inline execution if only one block
@@ -839,6 +835,32 @@ class CodegenContext {
 
       foldFunctions(outerClassFunctionCalls ++ innerClassFunctionCalls)
     }
+  }
+
+  /**
+   * Splits the generated code of expressions into multiple sequences of String
+   * based on a threshold of length of a String
+   *
+   * @param expressions the codes to evaluate expressions.
+   */
+  def buildCodeBlocks(expressions: Seq[String]): Seq[String] = {
+    val blocks = new ArrayBuffer[String]()
+    val blockBuilder = new StringBuilder()
+    var length = 0
+    for (code <- expressions) {
+      // We can't know how many bytecode will be generated, so use the length of source code
+      // as metric. A method should not go beyond 8K, otherwise it will not be JITted, should
+      // also not be too small, or it will have many function calls (for wide table), see the
+      // results in BenchmarkWideTable.
+      if (length > 1024) {
+        blocks += blockBuilder.toString()
+        blockBuilder.clear()
+        length = 0
+      }
+      blockBuilder.append(code)
+      length += CodeFormatter.stripExtraNewLinesAndComments(code).length
+    }
+    blocks += blockBuilder.toString()
   }
 
   /**
@@ -921,7 +943,7 @@ class CodegenContext {
       dataType: DataType,
       baseFuncName: String): (String, String, String) = {
     val globalIsNull = freshName("isNull")
-    addMutableState("boolean", globalIsNull, s"$globalIsNull = false;")
+    addMutableState(JAVA_BOOLEAN, globalIsNull, s"$globalIsNull = false;")
     val globalValue = freshName("value")
     addMutableState(javaType(dataType), globalValue,
       s"$globalValue = ${defaultValue(dataType)};")
@@ -1028,7 +1050,7 @@ class CodegenContext {
       //   2. Less code.
       // Currently, we will do this for all non-leaf only expression trees (i.e. expr trees with
       // at least two nodes) as the cost of doing it is expected to be low.
-      addMutableState("boolean", isNull, s"$isNull = false;")
+      addMutableState(JAVA_BOOLEAN, isNull, s"$isNull = false;")
       addMutableState(javaType(expr.dataType), value,
         s"$value = ${defaultValue(expr.dataType)};")
 
