@@ -27,7 +27,8 @@ import org.apache.spark.sql.catalyst.dsl.plans._
 import org.apache.spark.sql.catalyst.expressions._
 import org.apache.spark.sql.catalyst.plans.{Cross, Inner}
 import org.apache.spark.sql.catalyst.plans.logical._
-import org.apache.spark.sql.catalyst.plans.physical.{HashPartitioning, Partitioning, RangePartitioning}
+import org.apache.spark.sql.catalyst.plans.physical.{HashPartitioning, Partitioning,
+  RangePartitioning, RoundRobinPartitioning}
 import org.apache.spark.sql.types._
 
 
@@ -530,6 +531,8 @@ class AnalysisSuite extends AnalysisTest with Matchers {
     checkPartitioning[RangePartitioning](numPartitions = 10,
       exprs = SortOrder('a.attr, Ascending), SortOrder('b.attr, Descending))
 
+    checkPartitioning[RoundRobinPartitioning](numPartitions = 10, exprs = Seq.empty: _*)
+
     intercept[IllegalArgumentException] {
       checkPartitioning(numPartitions = 0, exprs = Literal(20))
     }
@@ -539,5 +542,19 @@ class AnalysisSuite extends AnalysisTest with Matchers {
     intercept[IllegalArgumentException] {
       checkPartitioning(numPartitions = 10, exprs = SortOrder('a.attr, Ascending), 'b.attr)
     }
+  }
+
+  test("SPARK-20392: analysis barrier") {
+    // [[AnalysisBarrier]] will be removed after analysis
+    checkAnalysis(
+      Project(Seq(UnresolvedAttribute("tbl.a")),
+        AnalysisBarrier(SubqueryAlias("tbl", testRelation))),
+      Project(testRelation.output, SubqueryAlias("tbl", testRelation)))
+
+    // Verify we won't go through a plan wrapped in a barrier.
+    // Since we wrap an unresolved plan and analyzer won't go through it. It remains unresolved.
+    val barrier = AnalysisBarrier(Project(Seq(UnresolvedAttribute("tbl.b")),
+      SubqueryAlias("tbl", testRelation)))
+    assertAnalysisError(barrier, Seq("cannot resolve '`tbl.b`'"))
   }
 }
