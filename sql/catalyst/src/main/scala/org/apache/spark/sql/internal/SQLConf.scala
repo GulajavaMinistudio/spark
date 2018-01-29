@@ -123,14 +123,12 @@ object SQLConf {
       .createWithDefault(10)
 
   val COMPRESS_CACHED = buildConf("spark.sql.inMemoryColumnarStorage.compressed")
-    .internal()
     .doc("When set to true Spark SQL will automatically select a compression codec for each " +
       "column based on statistics of the data.")
     .booleanConf
     .createWithDefault(true)
 
   val COLUMN_BATCH_SIZE = buildConf("spark.sql.inMemoryColumnarStorage.batchSize")
-    .internal()
     .doc("Controls the size of batches for columnar caching.  Larger batch sizes can improve " +
       "memory utilization and compression, but risk OOMs when caching data.")
     .intConf
@@ -1043,11 +1041,11 @@ object SQLConf {
 
   val ARROW_EXECUTION_ENABLE =
     buildConf("spark.sql.execution.arrow.enabled")
-      .internal()
-      .doc("Make use of Apache Arrow for columnar data transfers. Currently available " +
-        "for use with pyspark.sql.DataFrame.toPandas with the following data types: " +
-        "StringType, BinaryType, BooleanType, DoubleType, FloatType, ByteType, IntegerType, " +
-        "LongType, ShortType")
+      .doc("When true, make use of Apache Arrow for columnar data transfers. Currently available " +
+        "for use with pyspark.sql.DataFrame.toPandas, and " +
+        "pyspark.sql.SparkSession.createDataFrame when its input is a Pandas DataFrame. " +
+        "The following data types are unsupported: " +
+        "MapType, ArrayType of TimestampType, and nested StructType.")
       .booleanConf
       .createWithDefault(false)
 
@@ -1126,6 +1124,13 @@ object SQLConf {
         " the epoch has advanced on the driver.")
       .timeConf(TimeUnit.MILLISECONDS)
       .createWithDefault(100)
+
+  val DISABLED_V2_STREAMING_WRITERS = buildConf("spark.sql.streaming.disabledV2Writers")
+    .internal()
+    .doc("A comma-separated list of fully qualified data source register class names for which" +
+      " StreamWriteSupport is disabled. Writes to these sources will fail back to the V1 Sink.")
+    .stringConf
+    .createWithDefault("")
 
   object PartitionOverwriteMode extends Enumeration {
     val STATIC, DYNAMIC = Value
@@ -1493,6 +1498,8 @@ class SQLConf extends Serializable with Logging {
 
   def continuousStreamingExecutorPollIntervalMs: Long =
     getConf(CONTINUOUS_STREAMING_EXECUTOR_POLL_INTERVAL_MS)
+
+  def disabledV2StreamingWriters: String = getConf(DISABLED_V2_STREAMING_WRITERS)
 
   def concatBinaryAsString: Boolean = getConf(CONCAT_BINARY_AS_STRING)
 
