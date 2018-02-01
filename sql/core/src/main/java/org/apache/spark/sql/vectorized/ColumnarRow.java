@@ -19,7 +19,6 @@ package org.apache.spark.sql.vectorized;
 import org.apache.spark.annotation.InterfaceStability;
 import org.apache.spark.sql.catalyst.InternalRow;
 import org.apache.spark.sql.catalyst.expressions.GenericInternalRow;
-import org.apache.spark.sql.catalyst.util.MapData;
 import org.apache.spark.sql.types.*;
 import org.apache.spark.unsafe.types.CalendarInterval;
 import org.apache.spark.unsafe.types.UTF8String;
@@ -155,8 +154,9 @@ public final class ColumnarRow extends InternalRow {
   }
 
   @Override
-  public MapData getMap(int ordinal) {
-    throw new UnsupportedOperationException();
+  public ColumnarMap getMap(int ordinal) {
+    if (data.getChild(ordinal).isNullAt(rowId)) return null;
+    return data.getChild(ordinal).getMap(rowId);
   }
 
   @Override
