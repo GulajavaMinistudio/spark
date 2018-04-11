@@ -174,8 +174,8 @@ case class HashAggregateExec(
     }
   }
 
-  // The variables used as aggregation buffer. Only used for aggregation without keys.
-  private var bufVars: Seq[ExprCode] = _
+  // The variables used as aggregation buffer. Only used in codegen for aggregation without keys.
+  @transient private var bufVars: Seq[ExprCode] = _
 
   private def doProduceWithoutKeys(ctx: CodegenContext): String = {
     val initAgg = ctx.addMutableState(CodeGenerator.JAVA_BOOLEAN, "initAgg")
@@ -194,8 +194,10 @@ case class HashAggregateExec(
          | $isNull = ${ev.isNull};
          | $value = ${ev.value};
        """.stripMargin
-      ExprCode(ev.code + initVars, GlobalValue(isNull, CodeGenerator.JAVA_BOOLEAN),
-        GlobalValue(value, CodeGenerator.javaType(e.dataType)))
+      ExprCode(
+        ev.code + initVars,
+        JavaCode.isNullGlobal(isNull),
+        JavaCode.global(value, e.dataType))
     }
     val initBufVar = evaluateVariables(bufVars)
 
@@ -235,6 +237,8 @@ case class HashAggregateExec(
          |   ${child.asInstanceOf[CodegenSupport].produce(ctx, this)}
          | }
        """.stripMargin)
+
+    bufVars = null  // explicitly null this field out to allow the referent to be GC'd sooner
 
     val numOutput = metricTerm(ctx, "numOutputRows")
     val aggTime = metricTerm(ctx, "aggTime")
