@@ -336,7 +336,6 @@ object FunctionRegistry {
     expression[RegExpReplace]("regexp_replace"),
     expression[StringRepeat]("repeat"),
     expression[StringReplace]("replace"),
-    expression[StringReverse]("reverse"),
     expression[RLike]("rlike"),
     expression[StringRPad]("rpad"),
     expression[StringTrimRight]("rtrim"),
@@ -409,7 +408,9 @@ object FunctionRegistry {
     expression[MapValues]("map_values"),
     expression[Size]("size"),
     expression[SortArray]("sort_array"),
+    expression[ArrayMin]("array_min"),
     expression[ArrayMax]("array_max"),
+    expression[Reverse]("reverse"),
     CreateStruct.registryEntry,
 
     // misc functions
