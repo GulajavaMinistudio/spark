@@ -169,4 +169,74 @@ class CollectionExpressionsSuite extends SparkFunSuite with ExpressionEvalHelper
     checkEvaluation(Reverse(as7), null)
     checkEvaluation(Reverse(aa), Seq(Seq("e"), Seq("c", "d"), Seq("a", "b")))
   }
+
+  test("Array Position") {
+    val a0 = Literal.create(Seq(1, null, 2, 3), ArrayType(IntegerType))
+    val a1 = Literal.create(Seq[String](null, ""), ArrayType(StringType))
+    val a2 = Literal.create(Seq(null), ArrayType(LongType))
+    val a3 = Literal.create(null, ArrayType(StringType))
+
+    checkEvaluation(ArrayPosition(a0, Literal(3)), 4L)
+    checkEvaluation(ArrayPosition(a0, Literal(1)), 1L)
+    checkEvaluation(ArrayPosition(a0, Literal(0)), 0L)
+    checkEvaluation(ArrayPosition(a0, Literal.create(null, IntegerType)), null)
+
+    checkEvaluation(ArrayPosition(a1, Literal("")), 2L)
+    checkEvaluation(ArrayPosition(a1, Literal("a")), 0L)
+    checkEvaluation(ArrayPosition(a1, Literal.create(null, StringType)), null)
+
+    checkEvaluation(ArrayPosition(a2, Literal(1L)), 0L)
+    checkEvaluation(ArrayPosition(a2, Literal.create(null, LongType)), null)
+
+    checkEvaluation(ArrayPosition(a3, Literal("")), null)
+    checkEvaluation(ArrayPosition(a3, Literal.create(null, StringType)), null)
+  }
+
+  test("elementAt") {
+    val a0 = Literal.create(Seq(1, 2, 3), ArrayType(IntegerType))
+    val a1 = Literal.create(Seq[String](null, ""), ArrayType(StringType))
+    val a2 = Literal.create(Seq(null), ArrayType(LongType))
+    val a3 = Literal.create(null, ArrayType(StringType))
+
+    intercept[Exception] {
+      checkEvaluation(ElementAt(a0, Literal(0)), null)
+    }.getMessage.contains("SQL array indices start at 1")
+    intercept[Exception] { checkEvaluation(ElementAt(a0, Literal(1.1)), null) }
+    checkEvaluation(ElementAt(a0, Literal(4)), null)
+    checkEvaluation(ElementAt(a0, Literal(-4)), null)
+
+    checkEvaluation(ElementAt(a0, Literal(1)), 1)
+    checkEvaluation(ElementAt(a0, Literal(2)), 2)
+    checkEvaluation(ElementAt(a0, Literal(3)), 3)
+    checkEvaluation(ElementAt(a0, Literal(-3)), 1)
+    checkEvaluation(ElementAt(a0, Literal(-2)), 2)
+    checkEvaluation(ElementAt(a0, Literal(-1)), 3)
+
+    checkEvaluation(ElementAt(a1, Literal(1)), null)
+    checkEvaluation(ElementAt(a1, Literal(2)), "")
+    checkEvaluation(ElementAt(a1, Literal(-2)), null)
+    checkEvaluation(ElementAt(a1, Literal(-1)), "")
+
+    checkEvaluation(ElementAt(a2, Literal(1)), null)
+
+    checkEvaluation(ElementAt(a3, Literal(1)), null)
+
+
+    val m0 =
+      Literal.create(Map("a" -> "1", "b" -> "2", "c" -> null), MapType(StringType, StringType))
+    val m1 = Literal.create(Map[String, String](), MapType(StringType, StringType))
+    val m2 = Literal.create(null, MapType(StringType, StringType))
+
+    checkEvaluation(ElementAt(m0, Literal(1.0)), null)
+
+    checkEvaluation(ElementAt(m0, Literal("d")), null)
+
+    checkEvaluation(ElementAt(m1, Literal("a")), null)
+
+    checkEvaluation(ElementAt(m0, Literal("a")), "1")
+    checkEvaluation(ElementAt(m0, Literal("b")), "2")
+    checkEvaluation(ElementAt(m0, Literal("c")), null)
+
+    checkEvaluation(ElementAt(m2, Literal("a")), null)
+  }
 }
