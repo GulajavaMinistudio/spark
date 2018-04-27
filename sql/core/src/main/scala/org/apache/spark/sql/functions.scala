@@ -2691,11 +2691,22 @@ object functions {
 
   /**
    * Returns number of months between dates `date1` and `date2`.
+   * The result is rounded off to 8 digits.
    * @group datetime_funcs
    * @since 1.5.0
    */
   def months_between(date1: Column, date2: Column): Column = withExpr {
-    MonthsBetween(date1.expr, date2.expr)
+    new MonthsBetween(date1.expr, date2.expr)
+  }
+
+  /**
+   * Returns number of months between dates `date1` and `date2`. If `roundOff` is set to true, the
+   * result is rounded off to 8 digits; it is not rounded otherwise.
+   * @group datetime_funcs
+   * @since 2.4.0
+   */
+  def months_between(date1: Column, date2: Column, roundOff: Boolean): Column = withExpr {
+    MonthsBetween(date1.expr, date2.expr, lit(roundOff).expr)
   }
 
   /**
@@ -3026,6 +3037,25 @@ object functions {
    */
   def array_contains(column: Column, value: Any): Column = withExpr {
     ArrayContains(column.expr, Literal(value))
+  }
+
+  /**
+   * Concatenates the elements of `column` using the `delimiter`. Null values are replaced with
+   * `nullReplacement`.
+   * @group collection_funcs
+   * @since 2.4.0
+   */
+  def array_join(column: Column, delimiter: String, nullReplacement: String): Column = withExpr {
+    ArrayJoin(column.expr, Literal(delimiter), Some(Literal(nullReplacement)))
+  }
+
+  /**
+   * Concatenates the elements of `column` using the `delimiter`.
+   * @group collection_funcs
+   * @since 2.4.0
+   */
+  def array_join(column: Column, delimiter: String): Column = withExpr {
+    ArrayJoin(column.expr, Literal(delimiter), None)
   }
 
   /**
