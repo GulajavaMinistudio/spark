@@ -14,25 +14,17 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
+package org.apache.spark.deploy.k8s
 
-package org.apache.spark.sql.sources.v2.reader;
+import io.fabric8.kubernetes.api.model.{DoneablePod, HasMetadata, Pod, PodList}
+import io.fabric8.kubernetes.client.{Watch, Watcher}
+import io.fabric8.kubernetes.client.dsl.{FilterWatchListDeletable, MixedOperation, NamespaceListVisitFromServerGetDeleteRecreateWaitApplicable, PodResource}
 
-import org.apache.spark.annotation.InterfaceStability;
-
-/**
- * A mix in interface for {@link DataSourceReader}. Data source readers can implement this
- * interface to report statistics to Spark.
- *
- * Statistics are reported to the optimizer before a projection or any filters are pushed to the
- * DataSourceReader. Implementations that return more accurate statistics based on projection and
- * filters will not improve query performance until the planner can push operators before getting
- * stats.
- */
-@InterfaceStability.Evolving
-public interface SupportsReportStatistics extends DataSourceReader {
-
-  /**
-   * Returns the basic statistics of this data source.
-   */
-  Statistics getStatistics();
+object Fabric8Aliases {
+  type PODS = MixedOperation[Pod, PodList, DoneablePod, PodResource[Pod, DoneablePod]]
+  type LABELED_PODS = FilterWatchListDeletable[
+    Pod, PodList, java.lang.Boolean, Watch, Watcher[Pod]]
+  type SINGLE_POD = PodResource[Pod, DoneablePod]
+  type RESOURCE_LIST = NamespaceListVisitFromServerGetDeleteRecreateWaitApplicable[
+    HasMetadata, Boolean]
 }
