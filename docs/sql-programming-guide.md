@@ -1302,9 +1302,33 @@ the following case-insensitive options:
   <tr>
     <td><code>dbtable</code></td>
     <td>
-      The JDBC table that should be read. Note that anything that is valid in a <code>FROM</code> clause of
-      a SQL query can be used. For example, instead of a full table you could also use a
-      subquery in parentheses.
+      The JDBC table that should be read from or written into. Note that when using it in the read
+      path anything that is valid in a <code>FROM</code> clause of a SQL query can be used.
+      For example, instead of a full table you could also use a subquery in parentheses. It is not
+      allowed to specify `dbtable` and `query` options at the same time.
+    </td>
+  </tr>
+  <tr>
+    <td><code>query</code></td>
+    <td>
+      A query that will be used to read data into Spark. The specified query will be parenthesized and used
+      as a subquery in the <code>FROM</code> clause. Spark will also assign an alias to the subquery clause.
+      As an example, spark will issue a query of the following form to the JDBC Source.<br><br>
+      <code> SELECT &lt;columns&gt; FROM (&lt;user_specified_query&gt;) spark_gen_alias</code><br><br>
+      Below are couple of restrictions while using this option.<br>
+      <ol>
+         <li> It is not allowed to specify `dbtable` and `query` options at the same time. </li>
+         <li> It is not allowed to spcify `query` and `partitionColumn` options at the same time. When specifying
+            `partitionColumn` option is required, the subquery can be specified using `dbtable` option instead and
+            partition columns can be qualified using the subquery alias provided as part of `dbtable`. <br>
+            Example:<br>
+            <code>
+               spark.read.format("jdbc")<br>
+               &nbsp&nbsp .option("dbtable", "(select c1, c2 from t1) as subq")<br>
+               &nbsp&nbsp .option("partitionColumn", "subq.c1"<br>
+               &nbsp&nbsp .load()
+            </code></li>
+      </ol>
     </td>
   </tr>
 
@@ -1993,6 +2017,7 @@ working with timestamps in `pandas_udf`s to get the best performance, see
     - Literal values used in SQL operations are converted to DECIMAL with the exact precision and scale needed by them.
     - The configuration `spark.sql.decimalOperations.allowPrecisionLoss` has been introduced. It defaults to `true`, which means the new behavior described here; if set to `false`, Spark uses previous rules, ie. it doesn't adjust the needed scale to represent the values and it returns NULL if an exact representation of the value is not possible.
   - In PySpark, `df.replace` does not allow to omit `value` when `to_replace` is not a dictionary. Previously, `value` could be omitted in the other cases and had `None` by default, which is counterintuitive and error-prone.
+  - Un-aliased subquery's semantic has not been well defined with confusing behaviors. Since Spark 2.3, we invalidate such confusing cases, for example: `SELECT v.i from (SELECT i FROM v)`, Spark will throw an analysis exception in this case because users should not be able to use the qualifier inside a subquery. See [SPARK-20690](https://issues.apache.org/jira/browse/SPARK-20690) and [SPARK-21335](https://issues.apache.org/jira/browse/SPARK-21335) for more details.
 
 ## Upgrading From Spark SQL 2.1 to 2.2
 
