@@ -58,11 +58,12 @@ private[avro] class AvroFileFormat extends FileFormat with DataSourceRegister {
       options: Map[String, String],
       files: Seq[FileStatus]): Option[StructType] = {
     val conf = spark.sparkContext.hadoopConfiguration
+    val parsedOptions = new AvroOptions(options)
 
     // Schema evolution is not supported yet. Here we only pick a single random sample file to
     // figure out the schema of the whole dataset.
     val sampleFile =
-      if (conf.getBoolean(AvroFileFormat.IgnoreFilesWithoutExtensionProperty, true)) {
+      if (AvroFileFormat.ignoreFilesWithoutExtensions(conf)) {
         files.find(_.getPath.getName.endsWith(".avro")).getOrElse {
           throw new FileNotFoundException(
             "No Avro files found. Hadoop option \"avro.mapred.ignore.inputs.without.extension\" " +
@@ -76,7 +77,7 @@ private[avro] class AvroFileFormat extends FileFormat with DataSourceRegister {
       }
 
     // User can specify an optional avro json schema.
-    val avroSchema = options.get(AvroFileFormat.AvroSchema)
+    val avroSchema = parsedOptions.schema
       .map(new Schema.Parser().parse)
       .getOrElse {
         val in = new FsInput(sampleFile.getPath, conf)
@@ -114,10 +115,9 @@ private[avro] class AvroFileFormat extends FileFormat with DataSourceRegister {
       job: Job,
       options: Map[String, String],
       dataSchema: StructType): OutputWriterFactory = {
-    val recordName = options.getOrElse("recordName", "topLevelRecord")
-    val recordNamespace = options.getOrElse("recordNamespace", "")
+    val parsedOptions = new AvroOptions(options)
     val outputAvroSchema = SchemaConverters.toAvroType(
-      dataSchema, nullable = false, recordName, recordNamespace)
+      dataSchema, nullable = false, parsedOptions.recordName, parsedOptions.recordNamespace)
 
     AvroJob.setOutputKeySchema(job, outputAvroSchema)
     val AVRO_COMPRESSION_CODEC = "spark.sql.avro.compression.codec"
@@ -160,20 +160,18 @@ private[avro] class AvroFileFormat extends FileFormat with DataSourceRegister {
 
     val broadcastedConf =
       spark.sparkContext.broadcast(new AvroFileFormat.SerializableConfiguration(hadoopConf))
+    val parsedOptions = new AvroOptions(options)
 
     (file: PartitionedFile) => {
       val log = LoggerFactory.getLogger(classOf[AvroFileFormat])
       val conf = broadcastedConf.value.value
-      val userProvidedSchema = options.get(AvroFileFormat.AvroSchema).map(new Schema.Parser().parse)
+      val userProvidedSchema = parsedOptions.schema.map(new Schema.Parser().parse)
 
       // TODO Removes this check once `FileFormat` gets a general file filtering interface method.
       // Doing input file filtering is improper because we may generate empty tasks that process no
       // input files but stress the scheduler. We should probably add a more general input file
       // filtering mechanism for `FileFormat` data sources. See SPARK-16317.
-      if (
-        conf.getBoolean(AvroFileFormat.IgnoreFilesWithoutExtensionProperty, true) &&
-        !file.filePath.endsWith(".avro")
-      ) {
+      if (AvroFileFormat.ignoreFilesWithoutExtensions(conf) && !file.filePath.endsWith(".avro")) {
         Iterator.empty
       } else {
         val reader = {
@@ -238,8 +236,6 @@ private[avro] class AvroFileFormat extends FileFormat with DataSourceRegister {
 private[avro] object AvroFileFormat {
   val IgnoreFilesWithoutExtensionProperty = "avro.mapred.ignore.inputs.without.extension"
 
-  val AvroSchema = "avroSchema"
-
   class SerializableConfiguration(@transient var value: Configuration)
       extends Serializable with KryoSerializable {
     @transient private[avro] lazy val log = LoggerFactory.getLogger(getClass)
@@ -277,5 +273,12 @@ private[avro] object AvroFileFormat {
       value = new Configuration(false)
       value.readFields(new DataInputStream(in))
     }
+  }
+
+  def ignoreFilesWithoutExtensions(conf: Configuration): Boolean = {
+    // Files without .avro extensions are not ignored by default
+    val defaultValue = false
+
+    conf.getBoolean(AvroFileFormat.IgnoreFilesWithoutExtensionProperty, defaultValue)
   }
 }
