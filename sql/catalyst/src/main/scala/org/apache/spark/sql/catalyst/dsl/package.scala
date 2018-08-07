@@ -167,6 +167,8 @@ package object dsl {
     def upper(e: Expression): Expression = Upper(e)
     def lower(e: Expression): Expression = Lower(e)
     def coalesce(args: Expression*): Expression = Coalesce(args)
+    def greatest(args: Expression*): Expression = Greatest(args)
+    def least(args: Expression*): Expression = Least(args)
     def sqrt(e: Expression): Expression = Sqrt(e)
     def abs(e: Expression): Expression = Abs(e)
     def star(names: String*): Expression = names match {
@@ -356,10 +358,10 @@ package object dsl {
 
       def subquery(alias: Symbol): LogicalPlan = SubqueryAlias(alias.name, logicalPlan)
 
-      def except(otherPlan: LogicalPlan, isAll: Boolean = false): LogicalPlan =
+      def except(otherPlan: LogicalPlan, isAll: Boolean): LogicalPlan =
         Except(logicalPlan, otherPlan, isAll)
 
-      def intersect(otherPlan: LogicalPlan, isAll: Boolean = false): LogicalPlan =
+      def intersect(otherPlan: LogicalPlan, isAll: Boolean): LogicalPlan =
         Intersect(logicalPlan, otherPlan, isAll)
 
       def union(otherPlan: LogicalPlan): LogicalPlan = Union(logicalPlan, otherPlan)

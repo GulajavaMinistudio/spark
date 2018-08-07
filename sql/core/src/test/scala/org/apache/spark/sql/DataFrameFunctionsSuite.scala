@@ -1647,6 +1647,60 @@ class DataFrameFunctionsSuite extends QueryTest with SharedSQLContext {
     assert(result10.first.schema(0).dataType === expectedType10)
   }
 
+  test("array_intersect functions") {
+    val df1 = Seq((Array(1, 2, 4), Array(4, 2))).toDF("a", "b")
+    val ans1 = Row(Seq(2, 4))
+    checkAnswer(df1.select(array_intersect($"a", $"b")), ans1)
+    checkAnswer(df1.selectExpr("array_intersect(a, b)"), ans1)
+
+    val df2 = Seq((Array[Integer](1, 2, null, 4, 5), Array[Integer](-5, 4, null, 2, -1)))
+      .toDF("a", "b")
+    val ans2 = Row(Seq(2, null, 4))
+    checkAnswer(df2.select(array_intersect($"a", $"b")), ans2)
+    checkAnswer(df2.selectExpr("array_intersect(a, b)"), ans2)
+
+    val df3 = Seq((Array(1L, 2L, 4L), Array(4L, 2L))).toDF("a", "b")
+    val ans3 = Row(Seq(2L, 4L))
+    checkAnswer(df3.select(array_intersect($"a", $"b")), ans3)
+    checkAnswer(df3.selectExpr("array_intersect(a, b)"), ans3)
+
+    val df4 = Seq(
+      (Array[java.lang.Long](1L, 2L, null, 4L, 5L), Array[java.lang.Long](-5L, 4L, null, 2L, -1L)))
+      .toDF("a", "b")
+    val ans4 = Row(Seq(2L, null, 4L))
+    checkAnswer(df4.select(array_intersect($"a", $"b")), ans4)
+    checkAnswer(df4.selectExpr("array_intersect(a, b)"), ans4)
+
+    val df5 = Seq((Array("c", null, "a", "f"), Array("b", "a", null, "g"))).toDF("a", "b")
+    val ans5 = Row(Seq(null, "a"))
+    checkAnswer(df5.select(array_intersect($"a", $"b")), ans5)
+    checkAnswer(df5.selectExpr("array_intersect(a, b)"), ans5)
+
+    val df6 = Seq((null, null)).toDF("a", "b")
+    assert(intercept[AnalysisException] {
+      df6.select(array_intersect($"a", $"b"))
+    }.getMessage.contains("data type mismatch"))
+    assert(intercept[AnalysisException] {
+      df6.selectExpr("array_intersect(a, b)")
+    }.getMessage.contains("data type mismatch"))
+
+    val df7 = Seq((Array(1), Array("a"))).toDF("a", "b")
+    assert(intercept[AnalysisException] {
+      df7.select(array_intersect($"a", $"b"))
+    }.getMessage.contains("data type mismatch"))
+    assert(intercept[AnalysisException] {
+      df7.selectExpr("array_intersect(a, b)")
+    }.getMessage.contains("data type mismatch"))
+
+    val df8 = Seq((null, Array("a"))).toDF("a", "b")
+    assert(intercept[AnalysisException] {
+      df8.select(array_intersect($"a", $"b"))
+    }.getMessage.contains("data type mismatch"))
+    assert(intercept[AnalysisException] {
+      df8.selectExpr("array_intersect(a, b)")
+    }.getMessage.contains("data type mismatch"))
+  }
+
   test("transform function - array for primitive type not containing null") {
     val df = Seq(
       Seq(1, 9, 8, 7),
@@ -1894,6 +1948,127 @@ class DataFrameFunctionsSuite extends QueryTest with SharedSQLContext {
       df.selectExpr("filter(s, x -> x)")
     }
     assert(ex3.getMessage.contains("data type mismatch: argument 2 requires boolean type"))
+  }
+
+  test("aggregate function - array for primitive type not containing null") {
+    val df = Seq(
+      Seq(1, 9, 8, 7),
+      Seq(5, 8, 9, 7, 2),
+      Seq.empty,
+      null
+    ).toDF("i")
+
+    def testArrayOfPrimitiveTypeNotContainsNull(): Unit = {
+      checkAnswer(df.selectExpr("aggregate(i, 0, (acc, x) -> acc + x)"),
+        Seq(
+          Row(25),
+          Row(31),
+          Row(0),
+          Row(null)))
+      checkAnswer(df.selectExpr("aggregate(i, 0, (acc, x) -> acc + x, acc -> acc * 10)"),
+        Seq(
+          Row(250),
+          Row(310),
+          Row(0),
+          Row(null)))
+    }
+
+    // Test with local relation, the Project will be evaluated without codegen
+    testArrayOfPrimitiveTypeNotContainsNull()
+    // Test with cached relation, the Project will be evaluated with codegen
+    df.cache()
+    testArrayOfPrimitiveTypeNotContainsNull()
+  }
+
+  test("aggregate function - array for primitive type containing null") {
+    val df = Seq[Seq[Integer]](
+      Seq(1, 9, 8, 7),
+      Seq(5, null, 8, 9, 7, 2),
+      Seq.empty,
+      null
+    ).toDF("i")
+
+    def testArrayOfPrimitiveTypeContainsNull(): Unit = {
+      checkAnswer(df.selectExpr("aggregate(i, 0, (acc, x) -> acc + x)"),
+        Seq(
+          Row(25),
+          Row(null),
+          Row(0),
+          Row(null)))
+      checkAnswer(
+        df.selectExpr("aggregate(i, 0, (acc, x) -> acc + x, acc -> coalesce(acc, 0) * 10)"),
+        Seq(
+          Row(250),
+          Row(0),
+          Row(0),
+          Row(null)))
+    }
+
+    // Test with local relation, the Project will be evaluated without codegen
+    testArrayOfPrimitiveTypeContainsNull()
+    // Test with cached relation, the Project will be evaluated with codegen
+    df.cache()
+    testArrayOfPrimitiveTypeContainsNull()
+  }
+
+  test("aggregate function - array for non-primitive type") {
+    val df = Seq(
+      (Seq("c", "a", "b"), "a"),
+      (Seq("b", null, "c", null), "b"),
+      (Seq.empty, "c"),
+      (null, "d")
+    ).toDF("ss", "s")
+
+    def testNonPrimitiveType(): Unit = {
+      checkAnswer(df.selectExpr("aggregate(ss, s, (acc, x) -> concat(acc, x))"),
+        Seq(
+          Row("acab"),
+          Row(null),
+          Row("c"),
+          Row(null)))
+      checkAnswer(
+        df.selectExpr("aggregate(ss, s, (acc, x) -> concat(acc, x), acc -> coalesce(acc , ''))"),
+        Seq(
+          Row("acab"),
+          Row(""),
+          Row("c"),
+          Row(null)))
+    }
+
+    // Test with local relation, the Project will be evaluated without codegen
+    testNonPrimitiveType()
+    // Test with cached relation, the Project will be evaluated with codegen
+    df.cache()
+    testNonPrimitiveType()
+  }
+
+  test("aggregate function - invalid") {
+    val df = Seq(
+      (Seq("c", "a", "b"), 1),
+      (Seq("b", null, "c", null), 2),
+      (Seq.empty, 3),
+      (null, 4)
+    ).toDF("s", "i")
+
+    val ex1 = intercept[AnalysisException] {
+      df.selectExpr("aggregate(s, '', x -> x)")
+    }
+    assert(ex1.getMessage.contains("The number of lambda function arguments '1' does not match"))
+
+    val ex2 = intercept[AnalysisException] {
+      df.selectExpr("aggregate(s, '', (acc, x) -> x, (acc, x) -> x)")
+    }
+    assert(ex2.getMessage.contains("The number of lambda function arguments '2' does not match"))
+
+    val ex3 = intercept[AnalysisException] {
+      df.selectExpr("aggregate(i, 0, (acc, x) -> x)")
+    }
+    assert(ex3.getMessage.contains("data type mismatch: argument 1 requires array type"))
+
+    val ex4 = intercept[AnalysisException] {
+      df.selectExpr("aggregate(s, 0, (acc, x) -> x)")
+    }
+    assert(ex4.getMessage.contains("data type mismatch: argument 3 requires int type"))
   }
 
   private def assertValuesDoNotChangeAfterCoalesceOrUnion(v: Column): Unit = {
