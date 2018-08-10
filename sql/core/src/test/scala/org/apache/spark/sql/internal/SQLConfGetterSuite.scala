@@ -15,17 +15,19 @@
  * limitations under the License.
  */
 
-package org.apache.spark
+package org.apache.spark.sql.internal
 
-/**
- * Holds statistics about the output sizes in a map stage. May become a DeveloperApi in the future.
- *
- * @param shuffleId ID of the shuffle
- * @param bytesByPartitionId approximate number of output bytes for each map output partition
- *   (may be inexact due to use of compressed map statuses)
- * @param recordsByPartitionId number of output records for each map output partition
- */
-private[spark] class MapOutputStatistics(
-    val shuffleId: Int,
-    val bytesByPartitionId: Array[Long],
-    val recordsByPartitionId: Array[Long])
+import org.apache.spark.SparkFunSuite
+import org.apache.spark.sql.{LocalSparkSession, SparkSession}
+
+class SQLConfGetterSuite extends SparkFunSuite with LocalSparkSession {
+
+  test("SPARK-25076: SQLConf should not be retrieved from a stopped SparkSession") {
+    spark = SparkSession.builder().master("local").getOrCreate()
+    assert(SQLConf.get eq spark.sessionState.conf,
+      "SQLConf.get should get the conf from the active spark session.")
+    spark.stop()
+    assert(SQLConf.get eq SQLConf.getFallbackConf,
+      "SQLConf.get should not get conf from a stopped spark session.")
+  }
+}
