@@ -26,6 +26,7 @@ import scala.util.Random
 import org.apache.spark.sql.catalyst.InternalRow
 import org.apache.spark.sql.catalyst.expressions.Expression
 import org.apache.spark.sql.catalyst.expressions.codegen.CodegenFallback
+import org.apache.spark.sql.catalyst.plans.logical.OneRowRelation
 import org.apache.spark.sql.catalyst.util.DateTimeTestUtils
 import org.apache.spark.sql.functions._
 import org.apache.spark.sql.internal.SQLConf
@@ -85,14 +86,16 @@ class DataFrameFunctionsSuite extends QueryTest with SharedSQLContext {
     }
 
     val df5 = Seq((Seq("a", null), Seq(1, 2))).toDF("k", "v")
-    intercept[RuntimeException] {
+    val msg1 = intercept[Exception] {
       df5.select(map_from_arrays($"k", $"v")).collect
-    }
+    }.getMessage
+    assert(msg1.contains("Cannot use null as map key!"))
 
     val df6 = Seq((Seq(1, 2), Seq("a"))).toDF("k", "v")
-    intercept[RuntimeException] {
+    val msg2 = intercept[Exception] {
       df6.select(map_from_arrays($"k", $"v")).collect
-    }
+    }.getMessage
+    assert(msg2.contains("The given two arrays should have the same length"))
   }
 
   test("struct with column name") {
@@ -733,6 +736,56 @@ class DataFrameFunctionsSuite extends QueryTest with SharedSQLContext {
       df.selectExpr("array_contains(array(1, null), array(1, null)[0])"),
       Seq(Row(true), Row(true))
     )
+
+    checkAnswer(
+      OneRowRelation().selectExpr("array_contains(array(1), 1.23D)"),
+      Seq(Row(false))
+    )
+
+    checkAnswer(
+      OneRowRelation().selectExpr("array_contains(array(1), 1.0D)"),
+      Seq(Row(true))
+    )
+
+    checkAnswer(
+      OneRowRelation().selectExpr("array_contains(array(1.0D), 1)"),
+      Seq(Row(true))
+    )
+
+    checkAnswer(
+      OneRowRelation().selectExpr("array_contains(array(1.23D), 1)"),
+      Seq(Row(false))
+    )
+
+    checkAnswer(
+      OneRowRelation().selectExpr("array_contains(array(array(1)), array(1.0D))"),
+      Seq(Row(true))
+    )
+
+    checkAnswer(
+      OneRowRelation().selectExpr("array_contains(array(array(1)), array(1.23D))"),
+      Seq(Row(false))
+    )
+
+    val e1 = intercept[AnalysisException] {
+      OneRowRelation().selectExpr("array_contains(array(1), .01234567890123456790123456780)")
+    }
+    val errorMsg1 =
+      s"""
+         |Input to function array_contains should have been array followed by a
+         |value with same element type, but it's [array<int>, decimal(29,29)].
+       """.stripMargin.replace("\n", " ").trim()
+    assert(e1.message.contains(errorMsg1))
+
+    val e2 = intercept[AnalysisException] {
+      OneRowRelation().selectExpr("array_contains(array(1), 'foo')")
+    }
+    val errorMsg2 =
+      s"""
+         |Input to function array_contains should have been array followed by a
+         |value with same element type, but it's [array<int>, string].
+       """.stripMargin.replace("\n", " ").trim()
+    assert(e2.message.contains(errorMsg2))
   }
 
   test("arrays_overlap function") {
@@ -2377,7 +2430,7 @@ class DataFrameFunctionsSuite extends QueryTest with SharedSQLContext {
     assert(ex2.getMessage.contains(
       "The number of lambda function arguments '3' does not match"))
 
-    val ex3 = intercept[RuntimeException] {
+    val ex3 = intercept[Exception] {
       dfExample1.selectExpr("transform_keys(i, (k, v) -> v)").show()
     }
     assert(ex3.getMessage.contains("Cannot use null as map key!"))
@@ -2675,8 +2728,6 @@ class DataFrameFunctionsSuite extends QueryTest with SharedSQLContext {
     val funcsMustHaveAtLeastOneArg =
       ("coalesce", (df: DataFrame) => df.select(coalesce())) ::
       ("coalesce", (df: DataFrame) => df.selectExpr("coalesce()")) ::
-      ("named_struct", (df: DataFrame) => df.select(struct())) ::
-      ("named_struct", (df: DataFrame) => df.selectExpr("named_struct()")) ::
       ("hash", (df: DataFrame) => df.select(hash())) ::
       ("hash", (df: DataFrame) => df.selectExpr("hash()")) :: Nil
     funcsMustHaveAtLeastOneArg.foreach { case (name, func) =>
@@ -2697,7 +2748,7 @@ class DataFrameFunctionsSuite extends QueryTest with SharedSQLContext {
 
   test("SPARK-24734: Fix containsNull of Concat for array type") {
     val df = Seq((Seq(1), Seq[Integer](null), Seq("a", "b"))).toDF("k1", "k2", "v")
-    val ex = intercept[RuntimeException] {
+    val ex = intercept[Exception] {
       df.select(map_from_arrays(concat($"k1", $"k2"), $"v")).show()
     }
     assert(ex.getMessage.contains("Cannot use null as map key"))
