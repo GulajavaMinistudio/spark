@@ -14,29 +14,20 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
+package org.apache.spark.deploy.k8s.features.hadooputils
 
-package org.apache.spark.streaming.kafka
-
-import org.apache.spark.Partition
+import io.fabric8.kubernetes.api.model.Secret
 
 /**
- * @param topic kafka topic name
- * @param partition kafka partition id
- * @param fromOffset inclusive starting offset
- * @param untilOffset exclusive ending offset
- * @param host preferred kafka host, i.e. the leader at the time the rdd was created
- * @param port preferred kafka host's port
+ * Represents a given configuration of the Kerberos Configuration logic
+ * <p>
+ * - The secret containing a DT, either previously specified or built on the fly
+ * - The name of the secret where the DT will be stored
+ * - The data item-key on the secret which correlates with where the current DT data is stored
+ * - The Job User's username
  */
-private[kafka]
-class KafkaRDDPartition(
-  val index: Int,
-  val topic: String,
-  val partition: Int,
-  val fromOffset: Long,
-  val untilOffset: Long,
-  val host: String,
-  val port: Int
-) extends Partition {
-  /** Number of messages this partition refers to */
-  def count(): Long = untilOffset - fromOffset
-}
+private[spark] case class KerberosConfigSpec(
+    dtSecret: Option[Secret],
+    dtSecretName: String,
+    dtSecretItemKey: String,
+    jobUserName: String)
