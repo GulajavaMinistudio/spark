@@ -14,17 +14,12 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-package org.apache.spark.deploy.k8s.submit
+package org.apache.spark.deploy.k8s.integrationtest.backend.docker
 
-private[spark] sealed trait MainAppResource
+import org.apache.spark.deploy.k8s.integrationtest.TestConstants
+import org.apache.spark.deploy.k8s.integrationtest.backend.cloud.KubeConfigBackend
 
-private[spark] sealed trait NonJVMResource
+private[spark] object DockerForDesktopBackend
+  extends KubeConfigBackend(TestConstants.BACKEND_DOCKER_FOR_DESKTOP) {
 
-private[spark] case class JavaMainAppResource(primaryResource: Option[String])
-  extends MainAppResource
-
-private[spark] case class PythonMainAppResource(primaryResource: String)
-  extends MainAppResource with NonJVMResource
-
-private[spark] case class RMainAppResource(primaryResource: String)
-  extends MainAppResource with NonJVMResource
+}
