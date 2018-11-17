@@ -310,6 +310,7 @@ pyspark_core = Module(
         "python/(?!pyspark/(ml|mllib|sql|streaming))"
     ],
     python_test_goals=[
+        # doctests
         "pyspark.rdd",
         "pyspark.context",
         "pyspark.conf",
@@ -318,10 +319,22 @@ pyspark_core = Module(
         "pyspark.serializers",
         "pyspark.profiler",
         "pyspark.shuffle",
-        "pyspark.tests",
-        "pyspark.test_broadcast",
-        "pyspark.test_serializers",
         "pyspark.util",
+        # unittests
+        "pyspark.tests.test_appsubmit",
+        "pyspark.tests.test_broadcast",
+        "pyspark.tests.test_conf",
+        "pyspark.tests.test_context",
+        "pyspark.tests.test_daemon",
+        "pyspark.tests.test_join",
+        "pyspark.tests.test_profiler",
+        "pyspark.tests.test_rdd",
+        "pyspark.tests.test_readwrite",
+        "pyspark.tests.test_serializers",
+        "pyspark.tests.test_shuffle",
+        "pyspark.tests.test_taskcontext",
+        "pyspark.tests.test_util",
+        "pyspark.tests.test_worker",
     ]
 )
 
@@ -385,8 +398,13 @@ pyspark_streaming = Module(
         "python/pyspark/streaming"
     ],
     python_test_goals=[
+        # doctests
         "pyspark.streaming.util",
-        "pyspark.streaming.tests",
+        # unittests
+        "pyspark.streaming.tests.test_context",
+        "pyspark.streaming.tests.test_dstream",
+        "pyspark.streaming.tests.test_kinesis",
+        "pyspark.streaming.tests.test_listener",
     ]
 )
 
@@ -398,6 +416,7 @@ pyspark_mllib = Module(
         "python/pyspark/mllib"
     ],
     python_test_goals=[
+        # doctests
         "pyspark.mllib.classification",
         "pyspark.mllib.clustering",
         "pyspark.mllib.evaluation",
@@ -412,7 +431,13 @@ pyspark_mllib = Module(
         "pyspark.mllib.stat.KernelDensity",
         "pyspark.mllib.tree",
         "pyspark.mllib.util",
-        "pyspark.mllib.tests",
+        # unittests
+        "pyspark.mllib.tests.test_algorithms",
+        "pyspark.mllib.tests.test_feature",
+        "pyspark.mllib.tests.test_linalg",
+        "pyspark.mllib.tests.test_stat",
+        "pyspark.mllib.tests.test_streaming_algorithms",
+        "pyspark.mllib.tests.test_util",
     ],
     blacklisted_python_implementations=[
         "PyPy"  # Skip these tests under PyPy since they require numpy and it isn't available there
