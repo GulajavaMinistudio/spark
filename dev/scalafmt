@@ -1,3 +1,5 @@
+#!/usr/bin/env bash
+
 #
 # Licensed to the Apache Software Foundation (ASF) under one or more
 # contributor license agreements.  See the NOTICE file distributed with
@@ -15,24 +17,7 @@
 # limitations under the License.
 #
 
-ARG base_img
-ARG spark_uid=185
+# by default, format only files that differ from git master
+params="${@:---diff}"
 
-FROM $base_img
-WORKDIR /
-
-# Reset to root to run installation tasks
-USER 0
-
-RUN mkdir ${SPARK_HOME}/R
-
-RUN apk add --no-cache R R-dev
-
-COPY R ${SPARK_HOME}/R
-ENV R_HOME /usr/lib/R
-
-WORKDIR /opt/spark/work-dir
-ENTRYPOINT [ "/opt/entrypoint.sh" ]
-
-# Specify the User that the actual main process will run as
-USER ${spark_uid}
+./build/mvn mvn-scalafmt_2.12:format -Dscalafmt.skip=false -Dscalafmt.parameters="$params"
