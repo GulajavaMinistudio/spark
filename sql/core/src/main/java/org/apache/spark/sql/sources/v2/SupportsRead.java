@@ -14,23 +14,22 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-package org.apache.spark.deploy.k8s.submit
 
-import io.fabric8.kubernetes.client.KubernetesClient
+package org.apache.spark.sql.sources.v2;
 
-import org.apache.spark.SparkConf
-import org.apache.spark.deploy.k8s._
-import org.apache.spark.internal.config.ConfigEntry
+import org.apache.spark.sql.sources.v2.reader.Scan;
+import org.apache.spark.sql.sources.v2.reader.ScanBuilder;
 
-class KubernetesDriverBuilderSuite extends PodBuilderSuite {
+/**
+ * An internal base interface of mix-in interfaces for readable {@link Table}. This adds
+ * {@link #newScanBuilder(DataSourceOptions)} that is used to create a scan for batch, micro-batch,
+ * or continuous processing.
+ */
+interface SupportsRead extends Table {
 
-  override protected def templateFileConf: ConfigEntry[_] = {
-    Config.KUBERNETES_DRIVER_PODTEMPLATE_FILE
-  }
-
-  override protected def buildPod(sparkConf: SparkConf, client: KubernetesClient): SparkPod = {
-    val conf = KubernetesTestConf.createDriverConf(sparkConf = sparkConf)
-    new KubernetesDriverBuilder().buildFromFeatures(conf, client).pod
-  }
-
+  /**
+   * Returns a {@link ScanBuilder} which can be used to build a {@link Scan}. Spark will call this
+   * method to configure each scan.
+   */
+  ScanBuilder newScanBuilder(DataSourceOptions options);
 }
