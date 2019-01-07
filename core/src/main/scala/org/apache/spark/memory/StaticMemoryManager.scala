@@ -19,6 +19,7 @@ package org.apache.spark.memory
 
 import org.apache.spark.SparkConf
 import org.apache.spark.internal.config
+import org.apache.spark.internal.config.Tests.TEST_MEMORY
 import org.apache.spark.storage.BlockId
 
 /**
@@ -80,16 +81,23 @@ private[spark] class StaticMemoryManager(
       memoryMode: MemoryMode): Boolean = synchronized {
     require(memoryMode != MemoryMode.OFF_HEAP,
       "StaticMemoryManager does not support off-heap unroll memory")
-    val currentUnrollMemory = onHeapStorageMemoryPool.memoryStore.currentUnrollMemory
-    val freeMemory = onHeapStorageMemoryPool.memoryFree
-    // When unrolling, we will use all of the existing free memory, and, if necessary,
-    // some extra space freed from evicting cached blocks. We must place a cap on the
-    // amount of memory to be evicted by unrolling, however, otherwise unrolling one
-    // big block can blow away the entire cache.
-    val maxNumBytesToFree = math.max(0, maxUnrollMemory - currentUnrollMemory - freeMemory)
-    // Keep it within the range 0 <= X <= maxNumBytesToFree
-    val numBytesToFree = math.max(0, math.min(maxNumBytesToFree, numBytes - freeMemory))
-    onHeapStorageMemoryPool.acquireMemory(blockId, numBytes, numBytesToFree)
+    if (numBytes > maxOnHeapStorageMemory) {
+      // Fail fast if the block simply won't fit
+      logInfo(s"Will not store $blockId as the required space ($numBytes bytes) exceeds our " +
+        s"memory limit ($maxOnHeapStorageMemory bytes)")
+      false
+    } else {
+      val currentUnrollMemory = onHeapStorageMemoryPool.memoryStore.currentUnrollMemory
+      val freeMemory = onHeapStorageMemoryPool.memoryFree
+      // When unrolling, we will use all of the existing free memory, and, if necessary,
+      // some extra space freed from evicting cached blocks. We must place a cap on the
+      // amount of memory to be evicted by unrolling, however, otherwise unrolling one
+      // big block can blow away the entire cache.
+      val maxNumBytesToFree = math.max(0, maxUnrollMemory - currentUnrollMemory - freeMemory)
+      // Keep it within the range 0 <= X <= maxNumBytesToFree
+      val numBytesToFree = math.max(0, math.min(maxNumBytesToFree, numBytes - freeMemory))
+      onHeapStorageMemoryPool.acquireMemory(blockId, numBytes, numBytesToFree)
+    }
   }
 
   private[memory]
@@ -113,7 +121,7 @@ private[spark] object StaticMemoryManager {
    * Return the total amount of memory available for the storage region, in bytes.
    */
   private def getMaxStorageMemory(conf: SparkConf): Long = {
-    val systemMaxMemory = conf.getLong("spark.testing.memory", Runtime.getRuntime.maxMemory)
+    val systemMaxMemory = conf.get(TEST_MEMORY)
     val memoryFraction = conf.getDouble("spark.storage.memoryFraction", 0.6)
     val safetyFraction = conf.getDouble("spark.storage.safetyFraction", 0.9)
     (systemMaxMemory * memoryFraction * safetyFraction).toLong
@@ -123,7 +131,7 @@ private[spark] object StaticMemoryManager {
    * Return the total amount of memory available for the execution region, in bytes.
    */
   private def getMaxExecutionMemory(conf: SparkConf): Long = {
-    val systemMaxMemory = conf.getLong("spark.testing.memory", Runtime.getRuntime.maxMemory)
+    val systemMaxMemory = conf.get(TEST_MEMORY)
 
     if (systemMaxMemory < MIN_MEMORY_BYTES) {
       throw new IllegalArgumentException(s"System memory $systemMaxMemory must " +
