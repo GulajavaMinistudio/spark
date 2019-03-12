@@ -477,7 +477,7 @@ joinType
     : INNER?
     | CROSS
     | LEFT OUTER?
-    | LEFT SEMI
+    | LEFT? SEMI
     | RIGHT OUTER?
     | FULL OUTER?
     | LEFT? ANTI
@@ -603,7 +603,8 @@ valueExpression
     ;
 
 primaryExpression
-    : CASE whenClause+ (ELSE elseExpression=expression)? END                                   #searchedCase
+    : name=(CURRENT_DATE | CURRENT_TIMESTAMP)                                                  #currentDatetime
+    | CASE whenClause+ (ELSE elseExpression=expression)? END                                   #searchedCase
     | CASE value=expression whenClause+ (ELSE elseExpression=expression)? END                  #simpleCase
     | CAST '(' expression AS dataType ')'                                                      #cast
     | STRUCT '(' (argument+=namedExpression (',' argument+=namedExpression)*)? ')'             #struct
