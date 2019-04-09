@@ -14,13 +14,15 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-package org.apache.spark.sql.execution.datasources.v2.csv
+package org.apache.spark.sql.execution.datasources.v2.text
 
+import org.apache.spark.TaskContext
 import org.apache.spark.broadcast.Broadcast
 import org.apache.spark.sql.catalyst.InternalRow
-import org.apache.spark.sql.catalyst.csv.{CSVHeaderChecker, CSVOptions, UnivocityParser}
-import org.apache.spark.sql.execution.datasources.PartitionedFile
-import org.apache.spark.sql.execution.datasources.csv.CSVDataSource
+import org.apache.spark.sql.catalyst.expressions.UnsafeRow
+import org.apache.spark.sql.catalyst.expressions.codegen.UnsafeRowWriter
+import org.apache.spark.sql.execution.datasources.{HadoopFileLinesReader, HadoopFileWholeTextReader, PartitionedFile}
+import org.apache.spark.sql.execution.datasources.text.TextOptions
 import org.apache.spark.sql.execution.datasources.v2._
 import org.apache.spark.sql.internal.SQLConf
 import org.apache.spark.sql.sources.v2.reader.PartitionReader
@@ -28,40 +30,42 @@ import org.apache.spark.sql.types.StructType
 import org.apache.spark.util.SerializableConfiguration
 
 /**
- * A factory used to create CSV readers.
+ * A factory used to create Text readers.
  *
  * @param sqlConf SQL configuration.
  * @param broadcastedConf Broadcasted serializable Hadoop Configuration.
- * @param dataSchema Schema of CSV files.
- * @param readDataSchema Required data schema in the batch scan.
+ * @param readDataSchema Required schema in the batch scan.
  * @param partitionSchema Schema of partitions.
- * @param parsedOptions Options for parsing CSV files.
- */
-case class CSVPartitionReaderFactory(
+ * @param textOptions Options for reading a text file.
+ * */
+case class TextPartitionReaderFactory(
     sqlConf: SQLConf,
     broadcastedConf: Broadcast[SerializableConfiguration],
-    dataSchema: StructType,
     readDataSchema: StructType,
     partitionSchema: StructType,
-    parsedOptions: CSVOptions) extends FilePartitionReaderFactory {
-  private val columnPruning = sqlConf.csvColumnPruning
+    textOptions: TextOptions) extends FilePartitionReaderFactory {
 
   override def buildReader(file: PartitionedFile): PartitionReader[InternalRow] = {
-    val conf = broadcastedConf.value.value
-    val parser = new UnivocityParser(
-      StructType(dataSchema.filterNot(_.name == parsedOptions.columnNameOfCorruptRecord)),
-      StructType(readDataSchema.filterNot(_.name == parsedOptions.columnNameOfCorruptRecord)),
-      parsedOptions)
-    val schema = if (columnPruning) readDataSchema else dataSchema
-    val isStartOfFile = file.start == 0
-    val headerChecker = new CSVHeaderChecker(
-      schema, parsedOptions, source = s"CSV file: ${file.filePath}", isStartOfFile)
-    val iter = CSVDataSource(parsedOptions).readFile(
-      conf,
-      file,
-      parser,
-      headerChecker,
-      readDataSchema)
+    val confValue = broadcastedConf.value.value
+    val reader = if (!textOptions.wholeText) {
+      new HadoopFileLinesReader(file, textOptions.lineSeparatorInRead, confValue)
+    } else {
+      new HadoopFileWholeTextReader(file, confValue)
+    }
+    Option(TaskContext.get()).foreach(_.addTaskCompletionListener[Unit](_ => reader.close()))
+    val iter = if (readDataSchema.isEmpty) {
+      val emptyUnsafeRow = new UnsafeRow(0)
+      reader.map(_ => emptyUnsafeRow)
+    } else {
+      val unsafeRowWriter = new UnsafeRowWriter(1)
+
+      reader.map { line =>
+        // Writes to an UnsafeRow directly
+        unsafeRowWriter.reset()
+        unsafeRowWriter.write(0, line.getBytes, 0, line.getLength)
+        unsafeRowWriter.getRow()
+      }
+    }
     val fileReader = new PartitionReaderFromIterator[InternalRow](iter)
     new PartitionReaderWithPartitionValues(fileReader, readDataSchema,
       partitionSchema, file.partitionValues)

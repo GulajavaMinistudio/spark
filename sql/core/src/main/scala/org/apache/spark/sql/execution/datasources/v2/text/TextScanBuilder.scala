@@ -15,7 +15,7 @@
  * limitations under the License.
  */
 
-package org.apache.spark.sql.execution.datasources.v2.csv
+package org.apache.spark.sql.execution.datasources.v2.text
 
 import org.apache.spark.sql.SparkSession
 import org.apache.spark.sql.execution.datasources.PartitioningAwareFileIndex
@@ -24,7 +24,7 @@ import org.apache.spark.sql.sources.v2.reader.Scan
 import org.apache.spark.sql.types.StructType
 import org.apache.spark.sql.util.CaseInsensitiveStringMap
 
-case class CSVScanBuilder(
+case class TextScanBuilder(
     sparkSession: SparkSession,
     fileIndex: PartitioningAwareFileIndex,
     schema: StructType,
@@ -33,6 +33,6 @@ case class CSVScanBuilder(
   extends FileScanBuilder(sparkSession, fileIndex, dataSchema) {
 
   override def build(): Scan = {
-    CSVScan(sparkSession, fileIndex, dataSchema, readDataSchema(), readPartitionSchema(), options)
+    TextScan(sparkSession, fileIndex, readDataSchema(), readPartitionSchema(), options)
   }
 }
