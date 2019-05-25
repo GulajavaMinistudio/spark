@@ -15,12 +15,18 @@
  * limitations under the License.
  */
 
-package org.apache.spark.sql.sources.v2.writer;
+package org.apache.spark.sql.hive.test
 
-import org.apache.spark.sql.SaveMode;
+import java.io.File
 
-// A temporary mixin trait for `WriteBuilder` to support `SaveMode`. Will be removed before
-// Spark 3.0 when all the new write operators are finished. See SPARK-26356 for more details.
-public interface SupportsSaveMode extends WriteBuilder {
-  WriteBuilder mode(SaveMode mode);
+import org.apache.hadoop.hive.contrib.udaf.example.UDAFExampleMax
+import org.apache.hive.hcatalog.data.JsonSerDe
+
+object HiveTestUtils {
+
+  val getHiveContribJar: File =
+    new File(classOf[UDAFExampleMax].getProtectionDomain.getCodeSource.getLocation.getPath)
+
+  val getHiveHcatalogCoreJar: File =
+    new File(classOf[JsonSerDe].getProtectionDomain.getCodeSource.getLocation.getPath)
 }
