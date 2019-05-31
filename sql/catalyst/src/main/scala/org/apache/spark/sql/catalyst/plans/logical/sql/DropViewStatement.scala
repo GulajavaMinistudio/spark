@@ -15,18 +15,19 @@
  * limitations under the License.
  */
 
-package org.apache.spark.sql.hive.test
+package org.apache.spark.sql.catalyst.plans.logical.sql
 
-import java.io.File
+import org.apache.spark.sql.catalyst.expressions.Attribute
+import org.apache.spark.sql.catalyst.plans.logical.LogicalPlan
 
-import org.apache.hadoop.hive.contrib.udaf.example.UDAFExampleMax
-import org.apache.hive.hcatalog.data.JsonSerDe
+/**
+ * A DROP VIEW statement, as parsed from SQL.
+ */
+case class DropViewStatement(
+    viewName: Seq[String],
+    ifExists: Boolean) extends ParsedStatement {
 
-object HiveTestUtils {
+  override def output: Seq[Attribute] = Seq.empty
 
-  val getHiveContribJar: File =
-    new File(classOf[UDAFExampleMax].getProtectionDomain.getCodeSource.getLocation.getPath)
-
-  val getHiveHcatalogCoreJar: File =
-    new File(classOf[JsonSerDe].getProtectionDomain.getCodeSource.getLocation.getPath)
+  override def children: Seq[LogicalPlan] = Seq.empty
 }
