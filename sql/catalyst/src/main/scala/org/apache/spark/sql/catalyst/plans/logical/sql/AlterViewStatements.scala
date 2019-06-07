@@ -15,14 +15,19 @@
  * limitations under the License.
  */
 
-package org.apache.spark.sql.hive.client
+package org.apache.spark.sql.catalyst.plans.logical.sql
 
-import scala.collection.immutable.IndexedSeq
+/**
+ * ALTER VIEW ... SET TBLPROPERTIES command, as parsed from SQL.
+ */
+case class AlterViewSetPropertiesStatement(
+    viewName: Seq[String],
+    properties: Map[String, String]) extends ParsedStatement
 
-import org.apache.spark.SparkFunSuite
-
-private[client] trait HiveClientVersions {
-  protected val versions =
-    IndexedSeq("0.12", "0.13", "0.14", "1.0", "1.1", "1.2", "2.0", "2.1", "2.2", "2.3", "3.0",
-      "3.1")
-}
+/**
+ * ALTER VIEW ... UNSET TBLPROPERTIES command, as parsed from SQL.
+ */
+case class AlterViewUnsetPropertiesStatement(
+    viewName: Seq[String],
+    propertyKeys: Seq[String],
+    ifExists: Boolean) extends ParsedStatement
