@@ -898,14 +898,14 @@ class AstBuilder(conf: SQLConf) extends SqlBaseBaseVisitor[AnyRef] with Logging 
    * }}}
    */
   override def visitTable(ctx: TableContext): LogicalPlan = withOrigin(ctx) {
-    UnresolvedRelation(visitTableIdentifier(ctx.tableIdentifier))
+    UnresolvedRelation(visitMultipartIdentifier(ctx.multipartIdentifier))
   }
 
   /**
    * Create an aliased table reference. This is typically used in FROM clauses.
    */
   override def visitTableName(ctx: TableNameContext): LogicalPlan = withOrigin(ctx) {
-    val tableId = visitTableIdentifier(ctx.tableIdentifier)
+    val tableId = visitMultipartIdentifier(ctx.multipartIdentifier)
     val table = mayApplyAliasPlan(ctx.tableAlias, UnresolvedRelation(tableId))
     table.optionalMap(ctx.sample)(withSample)
   }
@@ -1835,7 +1835,7 @@ class AstBuilder(conf: SQLConf) extends SqlBaseBaseVisitor[AnyRef] with Logging 
    * Create a [[CalendarInterval]] for a unit value pair. Two unit configuration types are
    * supported:
    * - Single unit.
-   * - From-To unit (only 'YEAR TO MONTH' and 'DAY TO SECOND' are supported).
+   * - From-To unit (only 'YEAR TO MONTH' and 'DAY TO SECOND' and 'HOUR to SECOND' are supported).
    */
   override def visitIntervalField(ctx: IntervalFieldContext): CalendarInterval = withOrigin(ctx) {
     import ctx._
@@ -1851,6 +1851,8 @@ class AstBuilder(conf: SQLConf) extends SqlBaseBaseVisitor[AnyRef] with Logging 
         case ("year", Some("month")) =>
           CalendarInterval.fromYearMonthString(s)
         case ("day", Some("second")) =>
+          CalendarInterval.fromDayTimeString(s)
+        case ("hour", Some("second")) =>
           CalendarInterval.fromDayTimeString(s)
         case (from, Some(t)) =>
           throw new ParseException(s"Intervals FROM $from TO $t are not supported.", ctx)
