@@ -408,7 +408,7 @@ class DataFrame(object):
         """Returns a checkpointed version of this Dataset. Checkpointing can be used to truncate the
         logical plan of this DataFrame, which is especially useful in iterative algorithms where the
         plan may grow exponentially. It will be saved to files inside the checkpoint
-        directory set with L{SparkContext.setCheckpointDir()}.
+        directory set with :meth:`SparkContext.setCheckpointDir`.
 
         :param eager: Whether to checkpoint this DataFrame immediately
 
@@ -581,9 +581,9 @@ class DataFrame(object):
 
     @since(1.3)
     def cache(self):
-        """Persists the :class:`DataFrame` with the default storage level (C{MEMORY_AND_DISK}).
+        """Persists the :class:`DataFrame` with the default storage level (`MEMORY_AND_DISK`).
 
-        .. note:: The default storage level has changed to C{MEMORY_AND_DISK} to match Scala in 2.0.
+        .. note:: The default storage level has changed to `MEMORY_AND_DISK` to match Scala in 2.0.
         """
         self.is_cached = True
         self._jdf.cache()
@@ -594,9 +594,9 @@ class DataFrame(object):
         """Sets the storage level to persist the contents of the :class:`DataFrame` across
         operations after the first time it is computed. This can only be used to assign
         a new storage level if the :class:`DataFrame` does not have a storage level set yet.
-        If no storage level is specified defaults to (C{MEMORY_AND_DISK}).
+        If no storage level is specified defaults to (`MEMORY_AND_DISK`).
 
-        .. note:: The default storage level has changed to C{MEMORY_AND_DISK} to match Scala in 2.0.
+        .. note:: The default storage level has changed to `MEMORY_AND_DISK` to match Scala in 2.0.
         """
         self.is_cached = True
         javaStorageLevel = self._sc._getJavaStorageLevel(storageLevel)
@@ -2193,7 +2193,7 @@ class DataFrame(object):
                         _check_series_convert_timestamps_local_tz(pdf[field.name], timezone)
             return pdf
 
-    def mapPartitionsInPandas(self, udf):
+    def mapInPandas(self, udf):
         """
         Maps each partition of the current :class:`DataFrame` using a pandas udf and returns
         the result as a `DataFrame`.
@@ -2215,7 +2215,7 @@ class DataFrame(object):
         ... def filter_func(iterator):
         ...     for pdf in iterator:
         ...         yield pdf[pdf.id == 1]
-        >>> df.mapPartitionsInPandas(filter_func).show()  # doctest: +SKIP
+        >>> df.mapInPandas(filter_func).show()  # doctest: +SKIP
         +---+---+
         | id|age|
         +---+---+
@@ -2227,15 +2227,12 @@ class DataFrame(object):
         """
         # Columns are special because hasattr always return True
         if isinstance(udf, Column) or not hasattr(udf, 'func') \
-                or udf.evalType != PythonEvalType.SQL_SCALAR_PANDAS_ITER_UDF:
+                or udf.evalType != PythonEvalType.SQL_MAP_PANDAS_ITER_UDF:
             raise ValueError("Invalid udf: the udf argument must be a pandas_udf of type "
-                             "SCALAR_ITER.")
-
-        if not isinstance(udf.returnType, StructType):
-            raise ValueError("The returnType of the pandas_udf must be a StructType")
+                             "MAP_ITER.")
 
         udf_column = udf(*[self[col] for col in self.columns])
-        jdf = self._jdf.mapPartitionsInPandas(udf_column._jc.expr())
+        jdf = self._jdf.mapInPandas(udf_column._jc.expr())
         return DataFrame(jdf, self.sql_ctx)
 
     def _collectAsArrow(self):
