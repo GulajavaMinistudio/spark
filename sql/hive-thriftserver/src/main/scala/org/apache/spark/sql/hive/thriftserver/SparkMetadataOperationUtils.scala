@@ -15,32 +15,20 @@
  * limitations under the License.
  */
 
-package org.apache.spark.sql.types
+package org.apache.spark.sql.hive.thriftserver
 
-import org.apache.spark.annotation.Stable
+import org.apache.spark.sql.catalyst.catalog.CatalogTableType
+import org.apache.spark.sql.catalyst.catalog.CatalogTableType.{EXTERNAL, MANAGED, VIEW}
 
 /**
- * The data type representing calendar time intervals. The calendar time interval is stored
- * internally in two components: number of months the number of microseconds.
- *
- * Please use the singleton `DataTypes.CalendarIntervalType`.
- *
- * @note Calendar intervals are not comparable.
- *
- * @since 1.5.0
+ * Utils for metadata operations.
  */
-@Stable
-class CalendarIntervalType private() extends DataType {
+private[hive] trait SparkMetadataOperationUtils {
 
-  override def defaultSize: Int = 16
-
-  override def simpleString: String = "interval"
-
-  private[spark] override def asNullable: CalendarIntervalType = this
+  def tableTypeString(tableType: CatalogTableType): String = tableType match {
+    case EXTERNAL | MANAGED => "TABLE"
+    case VIEW => "VIEW"
+    case t =>
+      throw new IllegalArgumentException(s"Unknown table type is found: $t")
+  }
 }
-
-/**
- * @since 1.5.0
- */
-@Stable
-case object CalendarIntervalType extends CalendarIntervalType
