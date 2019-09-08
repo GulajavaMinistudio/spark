@@ -346,6 +346,15 @@ object SQLConf {
     .booleanConf
     .createWithDefault(false)
 
+  val NON_EMPTY_PARTITION_RATIO_FOR_BROADCAST_JOIN =
+    buildConf("spark.sql.adaptive.nonEmptyPartitionRatioForBroadcastJoin")
+      .doc("The relation with a non-empty partition ratio lower than this config will not be " +
+        "considered as the build side of a broadcast-hash join in adaptive execution regardless " +
+        "of its size.")
+      .doubleConf
+      .checkValue(_ >= 0, "The non-empty partition ratio must be positive number.")
+      .createWithDefault(0.2)
+
   val REDUCE_POST_SHUFFLE_PARTITIONS_ENABLED =
     buildConf("spark.sql.adaptive.reducePostShufflePartitions.enabled")
     .doc("When true and adaptive execution is enabled, this enables reducing the number of " +
@@ -1079,6 +1088,15 @@ object SQLConf {
       .doc("Enable vectorized aggregate hash map. This is for testing/benchmarking only.")
       .booleanConf
       .createWithDefault(false)
+
+  val CODEGEN_SPLIT_AGGREGATE_FUNC =
+    buildConf("spark.sql.codegen.aggregate.splitAggregateFunc.enabled")
+      .internal()
+      .doc("When true, the code generator would split aggregate code into individual methods " +
+        "instead of a single big method. This can be used to avoid oversized function that " +
+        "can miss the opportunity of JIT optimization.")
+      .booleanConf
+      .createWithDefault(true)
 
   val MAX_NESTED_VIEW_DEPTH =
     buildConf("spark.sql.view.maxNestedViewDepth")
@@ -2084,6 +2102,9 @@ class SQLConf extends Serializable with Logging {
 
   def adaptiveExecutionEnabled: Boolean = getConf(ADAPTIVE_EXECUTION_ENABLED)
 
+  def nonEmptyPartitionRatioForBroadcastJoin: Double =
+    getConf(NON_EMPTY_PARTITION_RATIO_FOR_BROADCAST_JOIN)
+
   def reducePostShufflePartitionsEnabled: Boolean = getConf(REDUCE_POST_SHUFFLE_PARTITIONS_ENABLED)
 
   def minNumPostShufflePartitions: Int =
@@ -2352,6 +2373,8 @@ class SQLConf extends Serializable with Logging {
 
   def cartesianProductExecBufferSpillThreshold: Int =
     getConf(CARTESIAN_PRODUCT_EXEC_BUFFER_SPILL_THRESHOLD)
+
+  def codegenSplitAggregateFunc: Boolean = getConf(SQLConf.CODEGEN_SPLIT_AGGREGATE_FUNC)
 
   def maxNestedViewDepth: Int = getConf(SQLConf.MAX_NESTED_VIEW_DEPTH)
 
