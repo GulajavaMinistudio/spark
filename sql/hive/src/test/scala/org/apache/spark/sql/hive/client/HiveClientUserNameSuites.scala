@@ -15,13 +15,14 @@
  * limitations under the License.
  */
 
-package org.apache.spark.sql.catalyst.plans.logical.sql
+package org.apache.spark.sql.hive.client
 
-import org.apache.spark.sql.catalyst.expressions.{Attribute, Expression}
-import org.apache.spark.sql.catalyst.plans.logical.LogicalPlan
+import scala.collection.immutable.IndexedSeq
 
-case class DeleteFromStatement(
-    tableName: Seq[String],
-    tableAlias: Option[String],
-    condition: Option[Expression])
-    extends ParsedStatement
+import org.scalatest.Suite
+
+class HiveClientUserNameSuites extends Suite with HiveClientVersions {
+  override def nestedSuites: IndexedSeq[Suite] = {
+    versions.map(new HiveClientUserNameSuite(_))
+  }
+}
