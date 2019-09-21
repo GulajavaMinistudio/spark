@@ -98,9 +98,7 @@ case class CurrentTimestamp() extends LeafExpression with CodegenFallback {
 
   override def dataType: DataType = TimestampType
 
-  override def eval(input: InternalRow): Any = {
-    instantToMicros(Instant.now())
-  }
+  override def eval(input: InternalRow): Any = currentTimestamp()
 
   override def prettyName: String = "current_timestamp"
 }
@@ -2055,10 +2053,15 @@ case class DatePart(field: Expression, source: Expression, child: Expression)
       if (!field.foldable) {
         throw new AnalysisException("The field parameter needs to be a foldable string value.")
       }
-      val fieldStr = field.eval().asInstanceOf[UTF8String].toString
-      DatePart.parseExtractField(fieldStr, source, {
-        throw new AnalysisException(s"Literals of type '$fieldStr' are currently not supported.")
-      })
+      val fieldEval = field.eval()
+      if (fieldEval == null) {
+        Literal(null, DoubleType)
+      } else {
+        val fieldStr = fieldEval.asInstanceOf[UTF8String].toString
+        DatePart.parseExtractField(fieldStr, source, {
+          throw new AnalysisException(s"Literals of type '$fieldStr' are currently not supported.")
+        })
+      }
     })
   }
 
