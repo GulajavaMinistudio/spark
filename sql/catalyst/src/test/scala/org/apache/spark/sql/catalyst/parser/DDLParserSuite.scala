@@ -929,6 +929,28 @@ class DDLParserSuite extends AnalysisTest {
           "location" -> "/home/user/db")))
   }
 
+  test("drop namespace") {
+    comparePlans(
+      parsePlan("DROP NAMESPACE a.b.c"),
+      DropNamespaceStatement(Seq("a", "b", "c"), ifExists = false, cascade = false))
+
+    comparePlans(
+      parsePlan("DROP NAMESPACE IF EXISTS a.b.c"),
+      DropNamespaceStatement(Seq("a", "b", "c"), ifExists = true, cascade = false))
+
+    comparePlans(
+      parsePlan("DROP NAMESPACE IF EXISTS a.b.c RESTRICT"),
+      DropNamespaceStatement(Seq("a", "b", "c"), ifExists = true, cascade = false))
+
+    comparePlans(
+      parsePlan("DROP NAMESPACE IF EXISTS a.b.c CASCADE"),
+      DropNamespaceStatement(Seq("a", "b", "c"), ifExists = true, cascade = true))
+
+    comparePlans(
+      parsePlan("DROP NAMESPACE a.b.c CASCADE"),
+      DropNamespaceStatement(Seq("a", "b", "c"), ifExists = false, cascade = true))
+  }
+
   test("show databases: basic") {
     comparePlans(
       parsePlan("SHOW DATABASES"),
@@ -1043,6 +1065,33 @@ class DDLParserSuite extends AnalysisTest {
     comparePlans(
       parsePlan("MSCK REPAIR TABLE a.b.c"),
       RepairTableStatement(Seq("a", "b", "c")))
+  }
+
+  test("LOAD DATA INTO table") {
+    comparePlans(
+      parsePlan("LOAD DATA INPATH 'filepath' INTO TABLE a.b.c"),
+      LoadDataStatement(Seq("a", "b", "c"), "filepath", false, false, None))
+
+    comparePlans(
+      parsePlan("LOAD DATA LOCAL INPATH 'filepath' INTO TABLE a.b.c"),
+      LoadDataStatement(Seq("a", "b", "c"), "filepath", true, false, None))
+
+    comparePlans(
+      parsePlan("LOAD DATA LOCAL INPATH 'filepath' OVERWRITE INTO TABLE a.b.c"),
+      LoadDataStatement(Seq("a", "b", "c"), "filepath", true, true, None))
+
+    comparePlans(
+      parsePlan(
+        s"""
+           |LOAD DATA LOCAL INPATH 'filepath' OVERWRITE INTO TABLE a.b.c
+           |PARTITION(ds='2017-06-10')
+         """.stripMargin),
+      LoadDataStatement(
+        Seq("a", "b", "c"),
+        "filepath",
+        true,
+        true,
+        Some(Map("ds" -> "2017-06-10"))))
   }
 
   test("SHOW CREATE table") {

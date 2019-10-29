@@ -2376,6 +2376,21 @@ class AstBuilder(conf: SQLConf) extends SqlBaseBaseVisitor[AnyRef] with Logging 
   }
 
   /**
+   * Create a [[DropNamespaceStatement]] command.
+   *
+   * For example:
+   * {{{
+   *   DROP (DATABASE|SCHEMA|NAMESPACE) [IF EXISTS] ns1.ns2 [RESTRICT|CASCADE];
+   * }}}
+   */
+  override def visitDropNamespace(ctx: DropNamespaceContext): LogicalPlan = withOrigin(ctx) {
+    DropNamespaceStatement(
+      visitMultipartIdentifier(ctx.multipartIdentifier),
+      ctx.EXISTS != null,
+      ctx.CASCADE != null)
+  }
+
+  /**
    * Create a [[ShowNamespacesStatement]] command.
    */
   override def visitShowNamespaces(ctx: ShowNamespacesContext): LogicalPlan = withOrigin(ctx) {
@@ -2795,6 +2810,25 @@ class AstBuilder(conf: SQLConf) extends SqlBaseBaseVisitor[AnyRef] with Logging 
    */
   override def visitRepairTable(ctx: RepairTableContext): LogicalPlan = withOrigin(ctx) {
     RepairTableStatement(visitMultipartIdentifier(ctx.multipartIdentifier()))
+  }
+
+  /**
+   * Create a [[LoadDataStatement]].
+   *
+   * For example:
+   * {{{
+   *   LOAD DATA [LOCAL] INPATH 'filepath' [OVERWRITE] INTO TABLE multi_part_name
+   *   [PARTITION (partcol1=val1, partcol2=val2 ...)]
+   * }}}
+   */
+  override def visitLoadData(ctx: LoadDataContext): LogicalPlan = withOrigin(ctx) {
+    LoadDataStatement(
+      tableName = visitMultipartIdentifier(ctx.multipartIdentifier),
+      path = string(ctx.path),
+      isLocal = ctx.LOCAL != null,
+      isOverwrite = ctx.OVERWRITE != null,
+      partition = Option(ctx.partitionSpec).map(visitNonOptionalPartitionSpec)
+    )
   }
 
   /**
