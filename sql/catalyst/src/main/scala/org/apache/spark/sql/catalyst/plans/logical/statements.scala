@@ -179,7 +179,14 @@ case class AlterTableUnsetPropertiesStatement(
  */
 case class AlterTableSetLocationStatement(
     tableName: Seq[String],
+    partitionSpec: Option[TablePartitionSpec],
     location: String) extends ParsedStatement
+
+/**
+ * ALTER TABLE ... RECOVER PARTITIONS command, as parsed from SQL.
+ */
+case class AlterTableRecoverPartitionsStatement(
+    tableName: Seq[String]) extends ParsedStatement
 
 /**
  * ALTER VIEW ... SET TBLPROPERTIES command, as parsed from SQL.
@@ -387,3 +394,10 @@ case class ShowPartitionsStatement(
  * A REFRESH TABLE statement, as parsed from SQL
  */
 case class RefreshTableStatement(tableName: Seq[String]) extends ParsedStatement
+
+/**
+ * A SHOW COLUMNS statement, as parsed from SQL
+ */
+case class ShowColumnsStatement(
+    table: Seq[String],
+    namespace: Option[Seq[String]]) extends ParsedStatement
