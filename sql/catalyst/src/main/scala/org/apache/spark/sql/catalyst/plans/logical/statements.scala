@@ -215,6 +215,15 @@ case class AlterTableDropPartitionStatement(
     retainData: Boolean) extends ParsedStatement
 
 /**
+ * ALTER TABLE ... SERDEPROPERTIES command, as parsed from SQL
+ */
+case class AlterTableSerDePropertiesStatement(
+    tableName: Seq[String],
+    serdeClassName: Option[String],
+    serdeProperties: Option[Map[String, String]],
+    partitionSpec: Option[TablePartitionSpec]) extends ParsedStatement
+
+/**
  * ALTER VIEW ... SET TBLPROPERTIES command, as parsed from SQL.
  */
 case class AlterViewSetPropertiesStatement(
@@ -427,3 +436,8 @@ case class RefreshTableStatement(tableName: Seq[String]) extends ParsedStatement
 case class ShowColumnsStatement(
     table: Seq[String],
     namespace: Option[Seq[String]]) extends ParsedStatement
+
+/**
+ * A SHOW CURRENT NAMESPACE statement, as parsed from SQL
+ */
+case class ShowCurrentNamespaceStatement() extends ParsedStatement

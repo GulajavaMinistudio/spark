@@ -2593,6 +2593,14 @@ class AstBuilder(conf: SQLConf) extends SqlBaseBaseVisitor[AnyRef] with Logging 
   }
 
   /**
+   * Create a [[ShowCurrentNamespaceStatement]].
+   */
+  override def visitShowCurrentNamespace(
+      ctx: ShowCurrentNamespaceContext) : LogicalPlan = withOrigin(ctx) {
+    ShowCurrentNamespaceStatement()
+  }
+
+  /**
    * Create a [[ShowTablesStatement]] command.
    */
   override def visitShowTables(ctx: ShowTablesContext): LogicalPlan = withOrigin(ctx) {
@@ -2669,9 +2677,12 @@ class AstBuilder(conf: SQLConf) extends SqlBaseBaseVisitor[AnyRef] with Logging 
       operationNotAllowed(s"ALTER TABLE table $verb COLUMN requires a TYPE or a COMMENT", ctx)
     }
 
+    val tableIdentifier = ctx.multipartIdentifier(0)
+    val qualifiedColumn = ctx.multipartIdentifier(1)
+
     AlterTableAlterColumnStatement(
-      visitMultipartIdentifier(ctx.multipartIdentifier),
-      typedVisit[Seq[String]](ctx.qualifiedName),
+      visitMultipartIdentifier(tableIdentifier),
+      typedVisit[Seq[String]](qualifiedColumn),
       Option(ctx.dataType).map(typedVisit[DataType]),
       Option(ctx.comment).map(string))
   }
@@ -3039,5 +3050,24 @@ class AstBuilder(conf: SQLConf) extends SqlBaseBaseVisitor[AnyRef] with Logging 
       ifExists = ctx.EXISTS != null,
       purge = ctx.PURGE != null,
       retainData = false)
+  }
+
+  /**
+   * Create an [[AlterTableSerDePropertiesStatement]]
+   *
+   * For example:
+   * {{{
+   *   ALTER TABLE multi_part_name [PARTITION spec] SET SERDE serde_name
+   *     [WITH SERDEPROPERTIES props];
+   *   ALTER TABLE multi_part_name [PARTITION spec] SET SERDEPROPERTIES serde_properties;
+   * }}}
+   */
+  override def visitSetTableSerDe(ctx: SetTableSerDeContext): LogicalPlan = withOrigin(ctx) {
+    AlterTableSerDePropertiesStatement(
+      visitMultipartIdentifier(ctx.multipartIdentifier),
+      Option(ctx.STRING).map(string),
+      Option(ctx.tablePropertyList).map(visitPropertyKeyValues),
+      // TODO a partition spec is allowed to have optional values. This is currently violated.
+      Option(ctx.partitionSpec).map(visitNonOptionalPartitionSpec))
   }
 }
