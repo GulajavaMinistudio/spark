@@ -91,8 +91,8 @@ statement
         ((COMMENT comment=STRING) |
          locationSpec |
          (WITH (DBPROPERTIES | PROPERTIES) tablePropertyList))*        #createNamespace
-    | ALTER database db=errorCapturingIdentifier
-        SET DBPROPERTIES tablePropertyList                             #setDatabaseProperties
+    | ALTER (database | NAMESPACE) multipartIdentifier
+        SET (DBPROPERTIES | PROPERTIES) tablePropertyList              #setNamespaceProperties
     | ALTER database db=errorCapturingIdentifier
         SET locationSpec                                               #setDatabaseLocation
     | DROP (database | NAMESPACE) (IF EXISTS)? multipartIdentifier
@@ -218,14 +218,6 @@ statement
     | SET ROLE .*?                                                     #failNativeCommand
     | SET .*?                                                          #setConfiguration
     | RESET                                                            #resetConfiguration
-    | DELETE FROM multipartIdentifier tableAlias whereClause?          #deleteFromTable
-    | UPDATE multipartIdentifier tableAlias setClause whereClause?     #updateTable
-    | MERGE INTO target=multipartIdentifier targetAlias=tableAlias
-        USING (source=multipartIdentifier |
-          '(' sourceQuery=query')') sourceAlias=tableAlias
-        ON mergeCondition=booleanExpression
-        matchedClause*
-        notMatchedClause*                                              #mergeIntoTable
     | unsupportedHiveNativeCommands .*?                                #failNativeCommand
     ;
 
@@ -402,6 +394,14 @@ resource
 dmlStatementNoWith
     : insertInto queryTerm queryOrganization                                       #singleInsertQuery
     | fromClause multiInsertQueryBody+                                             #multiInsertQuery
+    | DELETE FROM multipartIdentifier tableAlias whereClause?                      #deleteFromTable
+    | UPDATE multipartIdentifier tableAlias setClause whereClause?                 #updateTable
+    | MERGE INTO target=multipartIdentifier targetAlias=tableAlias
+        USING (source=multipartIdentifier |
+          '(' sourceQuery=query')') sourceAlias=tableAlias
+        ON mergeCondition=booleanExpression
+        matchedClause*
+        notMatchedClause*                                                          #mergeIntoTable
     ;
 
 queryOrganization
