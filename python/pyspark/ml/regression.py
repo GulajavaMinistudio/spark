@@ -593,7 +593,7 @@ class IsotonicRegression(JavaEstimator, _IsotonicRegressionParams, HasWeightCol,
     >>> model = ir.fit(df)
     >>> model.setFeaturesCol("features")
     IsotonicRegressionModel...
-    >>> model.numFeatures()
+    >>> model.numFeatures
     1
     >>> test0 = spark.createDataFrame([(Vectors.dense(-1.0),)], ["features"])
     >>> model.transform(test0).head().prediction
@@ -731,6 +731,7 @@ class IsotonicRegressionModel(JavaModel, _IsotonicRegressionParams, JavaMLWritab
         """
         return self._call_java("predictions")
 
+    @property
     @since("3.0.0")
     def numFeatures(self):
         """
@@ -930,7 +931,6 @@ class DecisionTreeRegressor(JavaPredictor, _DecisionTreeRegressorParams, JavaMLW
         """
         return self._set(checkpointInterval=value)
 
-    @since("1.4.0")
     def setSeed(self, value):
         """
         Sets the value of :py:attr:`seed`.
@@ -1013,6 +1013,8 @@ class RandomForestRegressor(JavaPredictor, _RandomForestRegressorParams, JavaMLW
     ...     (1.0, Vectors.dense(1.0)),
     ...     (0.0, Vectors.sparse(1, [], []))], ["label", "features"])
     >>> rf = RandomForestRegressor(numTrees=2, maxDepth=2)
+    >>> rf.getMinWeightFractionPerNode()
+    0.0
     >>> rf.setSeed(42)
     RandomForestRegressor...
     >>> model = rf.fit(df)
@@ -1062,13 +1064,15 @@ class RandomForestRegressor(JavaPredictor, _RandomForestRegressorParams, JavaMLW
                  maxDepth=5, maxBins=32, minInstancesPerNode=1, minInfoGain=0.0,
                  maxMemoryInMB=256, cacheNodeIds=False, checkpointInterval=10,
                  impurity="variance", subsamplingRate=1.0, seed=None, numTrees=20,
-                 featureSubsetStrategy="auto", leafCol="", minWeightFractionPerNode=0.0):
+                 featureSubsetStrategy="auto", leafCol="", minWeightFractionPerNode=0.0,
+                 weightCol=None):
         """
         __init__(self, featuresCol="features", labelCol="label", predictionCol="prediction", \
                  maxDepth=5, maxBins=32, minInstancesPerNode=1, minInfoGain=0.0, \
                  maxMemoryInMB=256, cacheNodeIds=False, checkpointInterval=10, \
                  impurity="variance", subsamplingRate=1.0, seed=None, numTrees=20, \
-                 featureSubsetStrategy="auto", leafCol=", minWeightFractionPerNode=0.0")
+                 featureSubsetStrategy="auto", leafCol=", minWeightFractionPerNode=0.0", \
+                 weightCol=None)
         """
         super(RandomForestRegressor, self).__init__()
         self._java_obj = self._new_java_obj(
@@ -1086,13 +1090,15 @@ class RandomForestRegressor(JavaPredictor, _RandomForestRegressorParams, JavaMLW
                   maxDepth=5, maxBins=32, minInstancesPerNode=1, minInfoGain=0.0,
                   maxMemoryInMB=256, cacheNodeIds=False, checkpointInterval=10,
                   impurity="variance", subsamplingRate=1.0, seed=None, numTrees=20,
-                  featureSubsetStrategy="auto", leafCol="", minWeightFractionPerNode=0.0):
+                  featureSubsetStrategy="auto", leafCol="", minWeightFractionPerNode=0.0,
+                  weightCol=None):
         """
         setParams(self, featuresCol="features", labelCol="label", predictionCol="prediction", \
                   maxDepth=5, maxBins=32, minInstancesPerNode=1, minInfoGain=0.0, \
                   maxMemoryInMB=256, cacheNodeIds=False, checkpointInterval=10, \
                   impurity="variance", subsamplingRate=1.0, seed=None, numTrees=20, \
-                  featureSubsetStrategy="auto", leafCol="", minWeightFractionPerNode=0.0)
+                  featureSubsetStrategy="auto", leafCol="", minWeightFractionPerNode=0.0, \
+                  weightCol=None)
         Sets params for linear regression.
         """
         kwargs = self._input_kwargs
@@ -1176,6 +1182,20 @@ class RandomForestRegressor(JavaPredictor, _RandomForestRegressorParams, JavaMLW
         Sets the value of :py:attr:`seed`.
         """
         return self._set(seed=value)
+
+    @since("3.0.0")
+    def setWeightCol(self, value):
+        """
+        Sets the value of :py:attr:`weightCol`.
+        """
+        return self._set(weightCol=value)
+
+    @since("3.0.0")
+    def setMinWeightFractionPerNode(self, value):
+        """
+        Sets the value of :py:attr:`minWeightFractionPerNode`.
+        """
+        return self._set(minWeightFractionPerNode=value)
 
 
 class RandomForestRegressionModel(_TreeEnsembleModel, _RandomForestRegressorParams,
@@ -2374,23 +2394,6 @@ class FMRegressor(JavaPredictor, _FactorizationMachinesParams, JavaMLWritable, J
 
     .. versionadded:: 3.0.0
     """
-
-    factorSize = Param(Params._dummy(), "factorSize", "Dimensionality of the factor vectors, " +
-                       "which are used to get pairwise interactions between variables",
-                       typeConverter=TypeConverters.toInt)
-
-    fitLinear = Param(Params._dummy(), "fitLinear", "whether to fit linear term (aka 1-way term)",
-                      typeConverter=TypeConverters.toBoolean)
-
-    miniBatchFraction = Param(Params._dummy(), "miniBatchFraction", "fraction of the input data " +
-                              "set that should be used for one iteration of gradient descent",
-                              typeConverter=TypeConverters.toFloat)
-
-    initStd = Param(Params._dummy(), "initStd", "standard deviation of initial coefficients",
-                    typeConverter=TypeConverters.toFloat)
-
-    solver = Param(Params._dummy(), "solver", "The solver algorithm for optimization. Supported " +
-                   "options: gd, adamW. (Default adamW)", typeConverter=TypeConverters.toString)
 
     @keyword_only
     def __init__(self, featuresCol="features", labelCol="label", predictionCol="prediction",
