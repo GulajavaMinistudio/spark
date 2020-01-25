@@ -241,18 +241,8 @@ class DataSourceV2Strategy(session: SparkSession) extends Strategy with Predicat
     case DropTable(catalog, ident, ifExists) =>
       DropTableExec(catalog, ident, ifExists) :: Nil
 
-    case a @ AlterTableSetLocation(r: ResolvedTable, partitionSpec, _) =>
-      if (partitionSpec.nonEmpty) {
-        throw new AnalysisException(
-          "ALTER TABLE SET LOCATION does not support partition for v2 tables.")
-      }
-      AlterTableExec(r.catalog, r.identifier, a.changes) :: Nil
-
-    case a: AlterTable =>
-      a.table match {
-        case r: ResolvedTable => AlterTableExec(r.catalog, r.identifier, a.changes) :: Nil
-        case _ => Nil
-      }
+    case AlterTable(catalog, ident, _, changes) =>
+      AlterTableExec(catalog, ident, changes) :: Nil
 
     case RenameTable(catalog, oldIdent, newIdent) =>
       RenameTableExec(catalog, oldIdent, newIdent) :: Nil
@@ -296,11 +286,6 @@ class DataSourceV2Strategy(session: SparkSession) extends Strategy with Predicat
 
     case r @ ShowTableProperties(ResolvedTable(_, _, table), propertyKey) =>
       ShowTablePropertiesExec(r.output, table, propertyKey) :: Nil
-
-    case AlterNamespaceSetOwner(ResolvedNamespace(catalog, namespace), name, typ) =>
-      val properties =
-        Map(SupportsNamespaces.PROP_OWNER_NAME -> name, SupportsNamespaces.PROP_OWNER_TYPE -> typ)
-      AlterNamespaceSetPropertiesExec(catalog, namespace, properties) :: Nil
 
     case _ => Nil
   }
