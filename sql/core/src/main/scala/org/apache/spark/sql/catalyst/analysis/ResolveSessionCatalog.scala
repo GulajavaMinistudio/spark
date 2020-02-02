@@ -378,9 +378,13 @@ class ResolveSessionCatalog(
         isOverwrite,
         partition)
 
-    case ShowCreateTableStatement(tbl) =>
+    case ShowCreateTableStatement(tbl, asSerde) if !asSerde =>
       val v1TableName = parseV1Table(tbl, "SHOW CREATE TABLE")
       ShowCreateTableCommand(v1TableName.asTableIdentifier)
+
+    case ShowCreateTableStatement(tbl, asSerde) if asSerde =>
+      val v1TableName = parseV1Table(tbl, "SHOW CREATE TABLE AS SERDE")
+      ShowCreateTableAsSerdeCommand(v1TableName.asTableIdentifier)
 
     case CacheTableStatement(tbl, plan, isLazy, options) =>
       val v1TableName = parseV1Table(tbl, "CACHE TABLE")
@@ -580,7 +584,7 @@ class ResolveSessionCatalog(
   }
 
   object SessionCatalogAndNamespace {
-    def unapply(resolved: ResolvedNamespace): Option[(SupportsNamespaces, Seq[String])] =
+    def unapply(resolved: ResolvedNamespace): Option[(CatalogPlugin, Seq[String])] =
       if (isSessionCatalog(resolved.catalog)) {
         Some(resolved.catalog -> resolved.namespace)
       } else {
