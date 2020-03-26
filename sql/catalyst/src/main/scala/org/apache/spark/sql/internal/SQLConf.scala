@@ -1675,14 +1675,17 @@ object SQLConf {
     Try { DateTimeUtils.getZoneId(zone) }.isSuccess
   }
 
-  val SESSION_LOCAL_TIMEZONE =
-    buildConf("spark.sql.session.timeZone")
-      .doc("""The ID of session local timezone, e.g. "GMT", "America/Los_Angeles", etc.""")
-      .version("2.2.0")
-      .stringConf
-      .checkValue(isValidTimezone, s"Cannot resolve the given timezone with" +
-        " ZoneId.of(_, ZoneId.SHORT_IDS)")
-      .createWithDefaultFunction(() => TimeZone.getDefault.getID)
+  val SESSION_LOCAL_TIMEZONE = buildConf("spark.sql.session.timeZone")
+    .doc("The ID of session local timezone in the format of either region-based zone IDs or " +
+      "zone offsets. Region IDs must have the form 'area/city', such as 'America/Los_Angeles'. " +
+      "Zone offsets must be in the format '(+|-)HH:mm', for example '-08:00' or '+01:00'. " +
+      "Also 'UTC' and 'Z' are supported as aliases of '+00:00'. Other short names are not " +
+      "recommended to use because they can be ambiguous.")
+    .version("2.2.0")
+    .stringConf
+    .checkValue(isValidTimezone, s"Cannot resolve the given timezone with" +
+      " ZoneId.of(_, ZoneId.SHORT_IDS)")
+    .createWithDefaultFunction(() => TimeZone.getDefault.getID)
 
   val WINDOW_EXEC_BUFFER_IN_MEMORY_THRESHOLD =
     buildConf("spark.sql.windowExec.buffer.in.memory.threshold")
@@ -2501,6 +2504,20 @@ object SQLConf {
       .booleanConf
       .createWithDefault(false)
 
+  val LEGACY_AVRO_REBASE_DATETIME =
+    buildConf("spark.sql.legacy.avro.rebaseDateTime.enabled")
+      .internal()
+      .doc("When true, rebase dates/timestamps from Proleptic Gregorian calendar " +
+        "to the hybrid calendar (Julian + Gregorian) in write and " +
+        "from the hybrid calendar to Proleptic Gregorian calendar in read. " +
+        "The rebasing is performed by converting micros/millis/days to " +
+        "a local date/timestamp in the source calendar, interpreting the resulted date/" +
+        "timestamp in the target calendar, and getting the number of micros/millis/days " +
+        "since the epoch 1970-01-01 00:00:00Z.")
+      .version("3.0.0")
+      .booleanConf
+      .createWithDefault(false)
+
   /**
    * Holds information about keys that have been deprecated.
    *
@@ -3079,6 +3096,8 @@ class SQLConf extends Serializable with Logging {
   def integerGroupingIdEnabled: Boolean = getConf(SQLConf.LEGACY_INTEGER_GROUPING_ID)
 
   def parquetRebaseDateTimeEnabled: Boolean = getConf(SQLConf.LEGACY_PARQUET_REBASE_DATETIME)
+
+  def avroRebaseDateTimeEnabled: Boolean = getConf(SQLConf.LEGACY_AVRO_REBASE_DATETIME)
 
   /** ********************** SQLConf functionality methods ************ */
 
