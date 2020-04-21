@@ -17,10 +17,9 @@
 
 package org.apache.spark.sql.catalyst.expressions
 
-import java.sql.Timestamp
 import java.time.{DateTimeException, LocalDate, LocalDateTime, ZoneId}
 import java.time.temporal.IsoFields
-import java.util.{Locale, TimeZone}
+import java.util.Locale
 
 import scala.util.control.NonFatal
 
@@ -64,6 +63,7 @@ trait TimeZoneAwareExpression extends Expression {
  */
 @ExpressionDescription(
   usage = "_FUNC_() - Returns the current date at the start of query evaluation.",
+  group = "datetime_funcs",
   since = "1.5.0")
 case class CurrentDate(timeZoneId: Option[String] = None)
   extends LeafExpression with TimeZoneAwareExpression with CodegenFallback {
@@ -91,6 +91,7 @@ case class CurrentDate(timeZoneId: Option[String] = None)
  */
 @ExpressionDescription(
   usage = "_FUNC_() - Returns the current timestamp at the start of query evaluation.",
+  group = "datetime_funcs",
   since = "1.5.0")
 case class CurrentTimestamp() extends LeafExpression with CodegenFallback {
   override def foldable: Boolean = true
@@ -153,6 +154,7 @@ case class CurrentBatchTimestamp(
       > SELECT _FUNC_('2016-07-30', 1);
        2016-07-31
   """,
+  group = "datetime_funcs",
   since = "1.5.0")
 case class DateAdd(startDate: Expression, days: Expression)
   extends BinaryExpression with ExpectsInputTypes {
@@ -188,6 +190,7 @@ case class DateAdd(startDate: Expression, days: Expression)
       > SELECT _FUNC_('2016-07-30', 1);
        2016-07-29
   """,
+  group = "datetime_funcs",
   since = "1.5.0")
 case class DateSub(startDate: Expression, days: Expression)
   extends BinaryExpression with ExpectsInputTypes {
@@ -219,6 +222,7 @@ case class DateSub(startDate: Expression, days: Expression)
       > SELECT _FUNC_('2009-07-30 12:58:59');
        12
   """,
+  group = "datetime_funcs",
   since = "1.5.0")
 case class Hour(child: Expression, timeZoneId: Option[String] = None)
   extends UnaryExpression with TimeZoneAwareExpression with ImplicitCastInputTypes {
@@ -250,6 +254,7 @@ case class Hour(child: Expression, timeZoneId: Option[String] = None)
       > SELECT _FUNC_('2009-07-30 12:58:59');
        58
   """,
+  group = "datetime_funcs",
   since = "1.5.0")
 case class Minute(child: Expression, timeZoneId: Option[String] = None)
   extends UnaryExpression with TimeZoneAwareExpression with ImplicitCastInputTypes {
@@ -281,6 +286,7 @@ case class Minute(child: Expression, timeZoneId: Option[String] = None)
       > SELECT _FUNC_('2009-07-30 12:58:59');
        59
   """,
+  group = "datetime_funcs",
   since = "1.5.0")
 case class Second(child: Expression, timeZoneId: Option[String] = None)
   extends UnaryExpression with TimeZoneAwareExpression with ImplicitCastInputTypes {
@@ -378,6 +384,7 @@ case class Microseconds(child: Expression, timeZoneId: Option[String] = None)
       > SELECT _FUNC_('2016-04-09');
        100
   """,
+  group = "datetime_funcs",
   since = "1.5.0")
 case class DayOfYear(child: Expression) extends UnaryExpression with ImplicitCastInputTypes {
 
@@ -402,6 +409,7 @@ case class DayOfYear(child: Expression) extends UnaryExpression with ImplicitCas
       > SELECT _FUNC_('2016-07-30');
        2016
   """,
+  group = "datetime_funcs",
   since = "1.5.0")
 case class Year(child: Expression) extends UnaryExpression with ImplicitCastInputTypes {
 
@@ -442,6 +450,7 @@ case class IsoYear(child: Expression) extends UnaryExpression with ImplicitCastI
       > SELECT _FUNC_('2016-08-31');
        3
   """,
+  group = "datetime_funcs",
   since = "1.5.0")
 case class Quarter(child: Expression) extends UnaryExpression with ImplicitCastInputTypes {
 
@@ -466,6 +475,7 @@ case class Quarter(child: Expression) extends UnaryExpression with ImplicitCastI
       > SELECT _FUNC_('2016-07-30');
        7
   """,
+  group = "datetime_funcs",
   since = "1.5.0")
 case class Month(child: Expression) extends UnaryExpression with ImplicitCastInputTypes {
 
@@ -515,6 +525,7 @@ case class DayOfMonth(child: Expression) extends UnaryExpression with ImplicitCa
       > SELECT _FUNC_('2009-07-30');
        5
   """,
+  group = "datetime_funcs",
   since = "2.3.0")
 // scalastyle:on line.size.limit
 case class DayOfWeek(child: Expression) extends DayWeek {
@@ -541,6 +552,7 @@ case class DayOfWeek(child: Expression) extends DayWeek {
       > SELECT _FUNC_('2009-07-30');
        3
   """,
+  group = "datetime_funcs",
   since = "2.4.0")
 // scalastyle:on line.size.limit
 case class WeekDay(child: Expression) extends DayWeek {
@@ -574,6 +586,7 @@ abstract class DayWeek extends UnaryExpression with ImplicitCastInputTypes {
       > SELECT _FUNC_('2008-02-20');
        8
   """,
+  group = "datetime_funcs",
   since = "1.5.0")
 // scalastyle:on line.size.limit
 case class WeekOfYear(child: Expression) extends UnaryExpression with ImplicitCastInputTypes {
@@ -611,6 +624,7 @@ case class WeekOfYear(child: Expression) extends UnaryExpression with ImplicitCa
       > SELECT _FUNC_('2016-04-08', 'y');
        2016
   """,
+  group = "datetime_funcs",
   since = "1.5.0")
 // scalastyle:on line.size.limit
 case class DateFormatClass(left: Expression, right: Expression, timeZoneId: Option[String] = None)
@@ -693,6 +707,7 @@ case class DateFormatClass(left: Expression, right: Expression, timeZoneId: Opti
       > SELECT _FUNC_('2016-04-08', 'yyyy-MM-dd');
        1460098800
   """,
+  group = "datetime_funcs",
   since = "1.6.0")
 // scalastyle:on line.size.limit
 case class ToUnixTimestamp(
@@ -742,6 +757,7 @@ case class ToUnixTimestamp(
       > SELECT _FUNC_('2016-04-08', 'yyyy-MM-dd');
        1460041200
   """,
+  group = "datetime_funcs",
   since = "1.5.0")
 // scalastyle:on line.size.limit
 case class UnixTimestamp(timeExp: Expression, format: Expression, timeZoneId: Option[String] = None)
@@ -935,6 +951,7 @@ abstract class UnixTime extends ToTimestamp {
       > SELECT _FUNC_(0, 'yyyy-MM-dd HH:mm:ss');
        1969-12-31 16:00:00
   """,
+  group = "datetime_funcs",
   since = "1.5.0")
 // scalastyle:on line.size.limit
 case class FromUnixTime(sec: Expression, format: Expression, timeZoneId: Option[String] = None)
@@ -1055,6 +1072,7 @@ case class FromUnixTime(sec: Expression, format: Expression, timeZoneId: Option[
       > SELECT _FUNC_('2009-01-12');
        2009-01-31
   """,
+  group = "datetime_funcs",
   since = "1.5.0")
 case class LastDay(startDate: Expression) extends UnaryExpression with ImplicitCastInputTypes {
   override def child: Expression = startDate
@@ -1090,6 +1108,7 @@ case class LastDay(startDate: Expression) extends UnaryExpression with ImplicitC
       > SELECT _FUNC_('2015-01-14', 'TU');
        2015-01-20
   """,
+  group = "datetime_funcs",
   since = "1.5.0")
 // scalastyle:on line.size.limit
 case class NextDay(startDate: Expression, dayOfWeek: Expression)
@@ -1202,6 +1221,7 @@ case class TimeAdd(start: Expression, interval: Expression, timeZoneId: Option[S
       > SELECT _FUNC_('2016-08-31', 'Asia/Seoul');
        2016-08-31 09:00:00
   """,
+  group = "datetime_funcs",
   since = "1.5.0")
 // scalastyle:on line.size.limit
 case class FromUTCTimestamp(left: Expression, right: Expression)
@@ -1296,6 +1316,7 @@ case class TimeSub(start: Expression, interval: Expression, timeZoneId: Option[S
       > SELECT _FUNC_('2016-08-31', 1);
        2016-09-30
   """,
+  group = "datetime_funcs",
   since = "1.5.0")
 // scalastyle:on line.size.limit
 case class AddMonths(startDate: Expression, numMonths: Expression)
@@ -1345,6 +1366,7 @@ case class AddMonths(startDate: Expression, numMonths: Expression)
       > SELECT _FUNC_('1997-02-28 10:30:00', '1996-10-30', false);
        3.9495967741935485
   """,
+  group = "datetime_funcs",
   since = "1.5.0")
 // scalastyle:on line.size.limit
 case class MonthsBetween(
@@ -1406,6 +1428,7 @@ case class MonthsBetween(
       > SELECT _FUNC_('2016-08-31', 'Asia/Seoul');
        2016-08-30 15:00:00
   """,
+  group = "datetime_funcs",
   since = "1.5.0")
 // scalastyle:on line.size.limit
 case class ToUTCTimestamp(left: Expression, right: Expression)
@@ -1477,6 +1500,7 @@ case class ToUTCTimestamp(left: Expression, right: Expression)
       > SELECT _FUNC_('2016-12-31', 'yyyy-MM-dd');
        2016-12-31
   """,
+  group = "datetime_funcs",
   since = "1.5.0")
 // scalastyle:on line.size.limit
 case class ParseToDate(left: Expression, format: Option[Expression], child: Expression)
@@ -1527,6 +1551,7 @@ case class ParseToDate(left: Expression, format: Option[Expression], child: Expr
       > SELECT _FUNC_('2016-12-31', 'yyyy-MM-dd');
        2016-12-31 00:00:00
   """,
+  group = "datetime_funcs",
   since = "2.2.0")
 // scalastyle:on line.size.limit
 case class ParseToTimestamp(left: Expression, format: Option[Expression], child: Expression)
@@ -1658,6 +1683,7 @@ trait TruncInstant extends BinaryExpression with ImplicitCastInputTypes {
       > SELECT _FUNC_('1981-01-19', 'millennium');
        1001-01-01
   """,
+  group = "datetime_funcs",
   since = "1.5.0")
 // scalastyle:on line.size.limit
 case class TruncDate(date: Expression, format: Expression)
@@ -1711,6 +1737,7 @@ case class TruncDate(date: Expression, format: Expression)
       > SELECT _FUNC_('CENTURY', '2015-03-05T09:32:05.123456');
        2001-01-01 00:00:00
   """,
+  group = "datetime_funcs",
   since = "2.3.0")
 // scalastyle:on line.size.limit
 case class TruncTimestamp(
@@ -1758,6 +1785,7 @@ case class TruncTimestamp(
       > SELECT _FUNC_('2009-07-30', '2009-07-31');
        -1
   """,
+  group = "datetime_funcs",
   since = "1.5.0")
 case class DateDiff(endDate: Expression, startDate: Expression)
   extends BinaryExpression with ImplicitCastInputTypes {
@@ -1811,6 +1839,7 @@ private case class GetTimestamp(
       > SELECT _FUNC_(2019, 2, 30);
        NULL
   """,
+  group = "datetime_funcs",
   since = "3.0.0")
 case class MakeDate(year: Expression, month: Expression, day: Expression)
   extends TernaryExpression with ImplicitCastInputTypes {
@@ -1872,6 +1901,7 @@ case class MakeDate(year: Expression, month: Expression, day: Expression)
       > SELECT _FUNC_(null, 7, 22, 15, 30, 0);
        NULL
   """,
+  group = "datetime_funcs",
   since = "3.0.0")
 // scalastyle:on line.size.limit
 case class MakeTimestamp(
@@ -2089,8 +2119,7 @@ object DatePart {
     case "MONTH" | "MON" | "MONS" | "MONTHS" => Month(source)
     case "WEEK" | "W" | "WEEKS" => WeekOfYear(source)
     case "DAY" | "D" | "DAYS" => DayOfMonth(source)
-    case "DAYOFWEEK" => DayOfWeek(source)
-    case "DOW" => Subtract(DayOfWeek(source), Literal(1))
+    case "DAYOFWEEK" | "DOW" => DayOfWeek(source)
     case "ISODOW" => Add(WeekDay(source), Literal(1))
     case "DOY" => DayOfYear(source)
     case "HOUR" | "H" | "HOURS" | "HR" | "HRS" => Hour(source)
@@ -2130,38 +2159,12 @@ object DatePartLike {
   }
 }
 
+// scalastyle:off line.size.limit
 @ExpressionDescription(
   usage = "_FUNC_(field, source) - Extracts a part of the date/timestamp or interval source.",
   arguments = """
     Arguments:
-      * field - selects which part of the source should be extracted.
-               Supported string values of `field` for dates and timestamps are:
-                ["MILLENNIUM", ("MILLENNIA", "MIL", "MILS"),
-                 "CENTURY", ("CENTURIES", "C", "CENT"),
-                 "DECADE", ("DECADES", "DEC", "DECS"),
-                 "YEAR", ("Y", "YEARS", "YR", "YRS"),
-                 "ISOYEAR",
-                 "QUARTER", ("QTR"),
-                 "MONTH", ("MON", "MONS", "MONTHS"),
-                 "WEEK", ("W", "WEEKS"),
-                 "DAY", ("D", "DAYS"),
-                 "DAYOFWEEK",
-                 "DOW",
-                 "ISODOW",
-                 "DOY",
-                 "HOUR", ("H", "HOURS", "HR", "HRS"),
-                 "MINUTE", ("M", "MIN", "MINS", "MINUTES"),
-                 "SECOND", ("S", "SEC", "SECONDS", "SECS"),
-                 "MILLISECONDS", ("MSEC", "MSECS", "MILLISECON", "MSECONDS", "MS"),
-                 "MICROSECONDS", ("USEC", "USECS", "USECONDS", "MICROSECON", "US"),
-                 "EPOCH"]
-                Supported string values of `field` for intervals are:
-                 ["YEAR", ("Y", "YEARS", "YR", "YRS"),
-                  "MONTH", ("MON", "MONS", "MONTHS"),
-                  "DAY", ("D", "DAYS"),
-                  "HOUR", ("H", "HOURS", "HR", "HRS"),
-                  "MINUTE", ("M", "MIN", "MINS", "MINUTES"),
-                  "SECOND", ("S", "SEC", "SECONDS", "SECS")]
+      * field - selects which part of the source should be extracted, and supported string values are as same as the fields of the equivalent function `EXTRACT`.
       * source - a date/timestamp or interval column from where `field` should be extracted
   """,
   examples = """
@@ -2179,7 +2182,12 @@ object DatePartLike {
       > SELECT _FUNC_('seconds', interval 5 hours 30 seconds 1 milliseconds 1 microseconds);
        30.001001
   """,
+  note = """
+    The _FUNC_ function is equivalent to the SQL-standard function `EXTRACT(field FROM source)`
+  """,
+  group = "datetime_funcs",
   since = "3.0.0")
+// scalastyle:on line.size.limit
 case class DatePart(field: Expression, source: Expression, child: Expression)
   extends RuntimeReplaceable {
 
@@ -2192,12 +2200,38 @@ case class DatePart(field: Expression, source: Expression, child: Expression)
   override def prettyName: String = "date_part"
 }
 
+// scalastyle:off line.size.limit
 @ExpressionDescription(
   usage = "_FUNC_(field FROM source) - Extracts a part of the date/timestamp or interval source.",
   arguments = """
     Arguments:
-      * field - selects which part of the source should be extracted and supported string values
-                are the same with the `date_part` fields.
+      * field - selects which part of the source should be extracted
+          - Supported string values of `field` for dates and timestamps are:
+              - "MILLENNIUM", ("MILLENNIA", "MIL", "MILS") - the conventional numbering of millennia
+              - "CENTURY", ("CENTURIES", "C", "CENT") - the conventional numbering of centuries
+              - "DECADE", ("DECADES", "DEC", "DECS") - the year field divided by 10
+              - "YEAR", ("Y", "YEARS", "YR", "YRS") - the year field
+              - "ISOYEAR" - the ISO 8601 week-numbering year that the datetime falls in
+              - "QUARTER", ("QTR") - the quarter (1 - 4) of the year that the datetime falls in
+              - "MONTH", ("MON", "MONS", "MONTHS") - the month field (1 - 12)
+              - "WEEK", ("W", "WEEKS") - the number of the ISO 8601 week-of-week-based-year. A week is considered to start on a Monday and week 1 is the first week with >3 days. In the ISO week-numbering system, it is possible for early-January dates to be part of the 52nd or 53rd week of the previous year, and for late-December dates to be part of the first week of the next year. For example, 2005-01-02 is part of the 53rd week of year 2004, while 2012-12-31 is part of the first week of 2013
+              - "DAY", ("D", "DAYS") - the day of the month field (1 - 31)
+              - "DAYOFWEEK",("DOW") - the day of the week for datetime as Sunday(1) to Saturday(7)
+              - "ISODOW" - ISO 8601 based day of the week for datetime as Monday(1) to Sunday(7)
+              - "DOY" - the day of the year (1 - 365/366)
+              - "HOUR", ("H", "HOURS", "HR", "HRS") - The hour field (0 - 23)
+              - "MINUTE", ("M", "MIN", "MINS", "MINUTES") - the minutes field (0 - 59)
+              - "SECOND", ("S", "SEC", "SECONDS", "SECS") - the seconds field, including fractional parts
+              - "MILLISECONDS", ("MSEC", "MSECS", "MILLISECON", "MSECONDS", "MS") - the seconds field, including fractional parts, multiplied by 1000. Note that this includes full seconds
+              - "MICROSECONDS", ("USEC", "USECS", "USECONDS", "MICROSECON", "US") - The seconds field, including fractional parts, multiplied by 1000000. Note that this includes full seconds
+              - "EPOCH" - the number of seconds with fractional part in microsecond precision since 1970-01-01 00:00:00 local time (can be negative)
+          - Supported string values of `field` for interval(which consists of `months`, `days`, `microseconds`) are:
+              - "YEAR", ("Y", "YEARS", "YR", "YRS") - the total `months` / 12
+              - "MONTH", ("MON", "MONS", "MONTHS") - the total `months` % 12
+              - "DAY", ("D", "DAYS") - the `days` part of interval
+              - "HOUR", ("H", "HOURS", "HR", "HRS") - how many hours the `microseconds` contains
+              - "MINUTE", ("M", "MIN", "MINS", "MINUTES") - how many minutes left after taking hours from `microseconds`
+              - "SECOND", ("S", "SEC", "SECONDS", "SECS") - how many second with fractions left after taking hours and minutes from `microseconds`
       * source - a date/timestamp or interval column from where `field` should be extracted
   """,
   examples = """
@@ -2215,7 +2249,11 @@ case class DatePart(field: Expression, source: Expression, child: Expression)
       > SELECT _FUNC_(seconds FROM interval 5 hours 30 seconds 1 milliseconds 1 microseconds);
        30.001001
   """,
+  note = """
+    The _FUNC_ function is equivalent to `date_part(field, source)`.
+  """,
   since = "3.0.0")
+// scalastyle:on line.size.limit
 case class Extract(field: Expression, source: Expression, child: Expression)
   extends RuntimeReplaceable {
 
