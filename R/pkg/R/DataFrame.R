@@ -1226,12 +1226,7 @@ setMethod("collect",
               # empty data.frame with 0 columns and 0 rows
               data.frame()
             } else if (useArrow) {
-              requireNamespace1 <- requireNamespace
-              if (requireNamespace1("arrow", quietly = TRUE)) {
-                read_arrow <- get("read_arrow", envir = asNamespace("arrow"), inherits = FALSE)
-                # Arrow drops `as_tibble` since 0.14.0, see ARROW-5190.
-                useAsTibble <- exists("as_tibble", envir = asNamespace("arrow"))
-
+              if (requireNamespace("arrow", quietly = TRUE)) {
                 portAuth <- callJMethod(x@sdf, "collectAsArrowToR")
                 port <- portAuth[[1]]
                 authSecret <- portAuth[[2]]
@@ -1239,10 +1234,10 @@ setMethod("collect",
                   port = port, blocking = TRUE, open = "wb", timeout = connectionTimeout)
                 output <- tryCatch({
                   doServerAuth(conn, authSecret)
-                  arrowTable <- read_arrow(readRaw(conn))
-                  if (useAsTibble) {
-                    as_tibble <- get("as_tibble", envir = asNamespace("arrow"))
-                    as.data.frame(as_tibble(arrowTable), stringsAsFactors = stringsAsFactors)
+                  arrowTable <- arrow::read_arrow(readRaw(conn))
+                  # Arrow drops `as_tibble` since 0.14.0, see ARROW-5190.
+                  if (exists("as_tibble", envir = asNamespace("arrow"))) {
+                    as.data.frame(arrow::as_tibble(arrowTable), stringsAsFactors = stringsAsFactors)
                   } else {
                     as.data.frame(arrowTable, stringsAsFactors = stringsAsFactors)
                   }
@@ -2614,7 +2609,7 @@ setMethod("join",
                     "left", "leftouter", "left_outer",
                     "right", "rightouter", "right_outer",
                     "semi", "left_semi", "leftsemi", "anti", "left_anti", "leftanti")) {
-                  joinType <- gsub("_", "", joinType)
+                  joinType <- gsub("_", "", joinType, fixed = TRUE)
                   sdf <- callJMethod(x@sdf, "join", y@sdf, joinExpr@jc, joinType)
                 } else {
                   stop(paste("joinType must be one of the following types:",
