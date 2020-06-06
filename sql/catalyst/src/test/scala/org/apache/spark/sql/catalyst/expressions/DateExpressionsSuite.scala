@@ -41,7 +41,7 @@ class DateExpressionsSuite extends SparkFunSuite with ExpressionEvalHelper {
   private val JST_OPT = Option(JST.getId)
 
   def toMillis(timestamp: String): Long = {
-    val tf = TimestampFormatter("yyyy-MM-dd HH:mm:ss", UTC)
+    val tf = TimestampFormatter("yyyy-MM-dd HH:mm:ss", UTC, isParsing = true)
     DateTimeUtils.microsToMillis(tf.parse(timestamp))
   }
   val date = "2015-04-08 13:10:15"
@@ -1196,5 +1196,15 @@ class DateExpressionsSuite extends SparkFunSuite with ExpressionEvalHelper {
     Seq('q', 'Q').foreach { l =>
       checkNullify(l)
     }
+  }
+
+
+  test("SPARK-31896: Handle am-pm timestamp parsing when hour is missing") {
+    checkEvaluation(
+      new ParseToTimestamp(Literal("PM"), Literal("a")).child,
+      Timestamp.valueOf("1970-01-01 12:00:00.0"))
+    checkEvaluation(
+      new ParseToTimestamp(Literal("11:11 PM"), Literal("mm:ss a")).child,
+      Timestamp.valueOf("1970-01-01 12:11:11.0"))
   }
 }

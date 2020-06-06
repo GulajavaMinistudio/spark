@@ -46,7 +46,7 @@ class Iso8601DateFormatter(
   extends DateFormatter with DateTimeFormatterHelper {
 
   @transient
-  private lazy val formatter = getOrCreateFormatter(pattern, locale)
+  private lazy val formatter = getOrCreateFormatter(pattern, locale, isParsing)
 
   @transient
   private lazy val legacyFormatter = DateFormatter.getLegacyFormatter(
@@ -58,12 +58,15 @@ class Iso8601DateFormatter(
       try {
         val localDate = toLocalDate(formatter.parse(s))
         localDateToDays(localDate)
-      } catch checkDiffResult(s, legacyFormatter.parse)
+      } catch checkParsedDiff(s, legacyFormatter.parse)
     }
   }
 
   override def format(localDate: LocalDate): String = {
-    localDate.format(formatter)
+    try {
+      localDate.format(formatter)
+    } catch checkFormattedDiff(toJavaDate(localDateToDays(localDate)),
+      (d: Date) => format(d))
   }
 
   override def format(days: Int): String = {
@@ -117,13 +120,7 @@ class LegacySimpleDateFormatter(pattern: String, locale: Locale) extends LegacyD
 object DateFormatter {
   import LegacyDateFormats._
 
-  /**
-   * Before Spark 3.0, the first day-of-week is always Monday. Since Spark 3.0, it depends on the
-   * locale.
-   * We pick GB as the default locale instead of US, to be compatible with Spark 2.x, as US locale
-   * uses Sunday as the first day-of-week. See SPARK-31879.
-   */
-  val defaultLocale: Locale = new Locale("en", "GB")
+  val defaultLocale: Locale = Locale.US
 
   val defaultPattern: String = "yyyy-MM-dd"
 
@@ -132,7 +129,7 @@ object DateFormatter {
       zoneId: ZoneId,
       locale: Locale = defaultLocale,
       legacyFormat: LegacyDateFormat = LENIENT_SIMPLE_DATE_FORMAT,
-      isParsing: Boolean = true): DateFormatter = {
+      isParsing: Boolean): DateFormatter = {
     val pattern = format.getOrElse(defaultPattern)
     if (SQLConf.get.legacyTimeParserPolicy == LEGACY) {
       getLegacyFormatter(pattern, zoneId, locale, legacyFormat)
@@ -165,11 +162,11 @@ object DateFormatter {
     getFormatter(Some(format), zoneId, locale, legacyFormat, isParsing)
   }
 
-  def apply(format: String, zoneId: ZoneId): DateFormatter = {
-    getFormatter(Some(format), zoneId)
+  def apply(format: String, zoneId: ZoneId, isParsing: Boolean = false): DateFormatter = {
+    getFormatter(Some(format), zoneId, isParsing = isParsing)
   }
 
   def apply(zoneId: ZoneId): DateFormatter = {
-    getFormatter(None, zoneId)
+    getFormatter(None, zoneId, isParsing = false)
   }
 }
