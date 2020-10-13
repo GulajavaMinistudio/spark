@@ -221,7 +221,7 @@ object SQLConf {
     .doc("Configures the log level for logging the change from the original plan to the new " +
       "plan after a rule or batch is applied. The value can be 'trace', 'debug', 'info', " +
       "'warn', or 'error'. The default log level is 'trace'.")
-    .version("3.0.0")
+    .version("3.1.0")
     .stringConf
     .transform(_.toUpperCase(Locale.ROOT))
     .checkValue(logLevel => Set("TRACE", "DEBUG", "INFO", "WARN", "ERROR").contains(logLevel),
@@ -233,7 +233,7 @@ object SQLConf {
     .internal()
     .doc("Configures a list of rules for logging plan changes, in which the rules are " +
       "specified by their rule names and separated by comma.")
-    .version("3.0.0")
+    .version("3.1.0")
     .stringConf
     .createOptional
 
@@ -241,7 +241,7 @@ object SQLConf {
     .internal()
     .doc("Configures a list of batches for logging plan changes, in which the batches " +
       "are specified by their batch names and separated by comma.")
-    .version("3.0.0")
+    .version("3.1.0")
     .stringConf
     .createOptional
 
@@ -2342,6 +2342,16 @@ object SQLConf {
       .booleanConf
       .createWithDefault(false)
 
+  val LEGACY_STATISTICAL_AGGREGATE =
+    buildConf("spark.sql.legacy.statisticalAggregate")
+      .internal()
+      .doc("When set to true, statistical aggregate function returns Double.NaN " +
+        "if divide by zero occurred during expression evaluation, otherwise, it returns null. " +
+        "Before version 3.1.0, it returns NaN in divideByZero case by default.")
+      .version("3.1.0")
+      .booleanConf
+      .createWithDefault(false)
+
   val TRUNCATE_TABLE_IGNORE_PERMISSION_ACL =
     buildConf("spark.sql.truncateTable.ignorePermissionAcl.enabled")
       .internal()
@@ -2774,6 +2784,15 @@ object SQLConf {
       .version("3.1.0")
       .booleanConf
       .createWithDefault(false)
+
+  val DISABLED_JDBC_CONN_PROVIDER_LIST =
+    buildConf("spark.sql.sources.disabledJdbcConnProviderList")
+    .internal()
+    .doc("Configures a list of JDBC connection providers, which are disabled. " +
+      "The list contains the name of the JDBC connection providers separated by comma.")
+    .version("3.1.0")
+    .stringConf
+    .createWithDefault("")
 
   /**
    * Holds information about keys that have been deprecated.
@@ -3355,6 +3374,8 @@ class SQLConf extends Serializable with Logging {
   def allowNegativeScaleOfDecimalEnabled: Boolean =
     getConf(SQLConf.LEGACY_ALLOW_NEGATIVE_SCALE_OF_DECIMAL_ENABLED)
 
+  def legacyStatisticalAggregate: Boolean = getConf(SQLConf.LEGACY_STATISTICAL_AGGREGATE)
+
   def truncateTableIgnorePermissionAcl: Boolean =
     getConf(SQLConf.TRUNCATE_TABLE_IGNORE_PERMISSION_ACL)
 
@@ -3398,6 +3419,8 @@ class SQLConf extends Serializable with Logging {
   def legacyPathOptionBehavior: Boolean = getConf(SQLConf.LEGACY_PATH_OPTION_BEHAVIOR)
 
   def truncateTrashEnabled: Boolean = getConf(SQLConf.TRUNCATE_TRASH_ENABLED)
+
+  def disabledJdbcConnectionProviders: String = getConf(SQLConf.DISABLED_JDBC_CONN_PROVIDER_LIST)
 
   /** ********************** SQLConf functionality methods ************ */
 
