@@ -971,7 +971,7 @@ object SQLConf {
         "false, this configuration does not take any effect.")
       .version("3.1.0")
       .booleanConf
-      .createWithDefault(false)
+      .createWithDefault(true)
 
   val CROSS_JOINS_ENABLED = buildConf("spark.sql.crossJoin.enabled")
     .internal()
@@ -1249,6 +1249,13 @@ object SQLConf {
     .internal()
     .doc("Whether to remove redundant project exec node based on children's output and " +
       "ordering requirement.")
+    .version("3.1.0")
+    .booleanConf
+    .createWithDefault(true)
+
+  val REMOVE_REDUNDANT_SORTS_ENABLED = buildConf("spark.sql.execution.removeRedundantSorts")
+    .internal()
+    .doc("Whether to remove redundant physical sort node")
     .version("3.1.0")
     .booleanConf
     .createWithDefault(true)
