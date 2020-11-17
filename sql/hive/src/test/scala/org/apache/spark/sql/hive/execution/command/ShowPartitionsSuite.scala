@@ -15,24 +15,12 @@
  * limitations under the License.
  */
 
-package org.apache.spark.sql.execution.command
+package org.apache.spark.sql.hive.execution.command
 
-import org.apache.spark.sql.catalyst.SQLConfHelper
-import org.apache.spark.sql.catalyst.plans.logical.LogicalPlan
-import org.apache.spark.sql.util.SchemaUtils
+import org.apache.spark.sql.execution.command.v1
+import org.apache.spark.sql.hive.test.TestHiveSingleton
 
-/**
- * Checks legitimization of various execution commands.
- */
-object CommandCheck extends (LogicalPlan => Unit) with SQLConfHelper {
-
-  override def apply(plan: LogicalPlan): Unit = {
-    plan.foreach {
-      case AnalyzeColumnCommand(_, colsOpt, allColumns) if !allColumns =>
-        colsOpt.foreach(SchemaUtils.checkColumnNameDuplication(
-          _, "in analyze columns.", conf.caseSensitiveAnalysis))
-
-      case _ =>
-    }
-  }
+class ShowPartitionsSuite extends v1.ShowPartitionsSuiteBase with TestHiveSingleton {
+  override def version: String = "Hive V1"
+  override def defaultUsing: String = "USING HIVE"
 }

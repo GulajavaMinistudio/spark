@@ -17,22 +17,20 @@
 
 package org.apache.spark.sql.execution.command
 
-import org.apache.spark.sql.catalyst.SQLConfHelper
-import org.apache.spark.sql.catalyst.plans.logical.LogicalPlan
-import org.apache.spark.sql.util.SchemaUtils
+import org.scalactic.source.Position
+import org.scalatest.Tag
 
-/**
- * Checks legitimization of various execution commands.
- */
-object CommandCheck extends (LogicalPlan => Unit) with SQLConfHelper {
+import org.apache.spark.sql.QueryTest
+import org.apache.spark.sql.test.SQLTestUtils
 
-  override def apply(plan: LogicalPlan): Unit = {
-    plan.foreach {
-      case AnalyzeColumnCommand(_, colsOpt, allColumns) if !allColumns =>
-        colsOpt.foreach(SchemaUtils.checkColumnNameDuplication(
-          _, "in analyze columns.", conf.caseSensitiveAnalysis))
+trait ShowPartitionsSuiteBase extends QueryTest with SQLTestUtils {
+  protected def version: String
+  protected def catalog: String
+  protected def defaultNamespace: Seq[String]
+  protected def defaultUsing: String
 
-      case _ =>
-    }
+  override def test(testName: String, testTags: Tag*)(testFun: => Any)
+      (implicit pos: Position): Unit = {
+    super.test(s"SHOW PARTITIONS $version: " + testName, testTags: _*)(testFun)
   }
 }
