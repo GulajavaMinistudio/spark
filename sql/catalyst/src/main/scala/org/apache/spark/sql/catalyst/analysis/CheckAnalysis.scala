@@ -101,12 +101,14 @@ trait CheckAnalysis extends PredicateHelper {
         u.failAnalysis(s"Table not found for '${u.commandName}': ${u.multipartIdentifier.quoted}")
 
       case u: UnresolvedTableOrView =>
-        u.failAnalysis(s"Table or view not found: ${u.multipartIdentifier.quoted}")
+        val viewStr = if (u.allowTempView) "view" else "permanent view"
+        u.failAnalysis(
+          s"Table or $viewStr not found for '${u.commandName}': ${u.multipartIdentifier.quoted}")
 
       case u: UnresolvedRelation =>
         u.failAnalysis(s"Table or view not found: ${u.multipartIdentifier.quoted}")
 
-      case InsertIntoStatement(u: UnresolvedRelation, _, _, _, _) =>
+      case InsertIntoStatement(u: UnresolvedRelation, _, _, _, _, _) =>
         failAnalysis(s"Table not found: ${u.multipartIdentifier.quoted}")
 
       // TODO (SPARK-27484): handle streaming write commands when we have them.
