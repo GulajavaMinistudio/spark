@@ -471,6 +471,16 @@ package object config {
         "cache block replication should be positive.")
       .createWithDefaultString("30s")
 
+  private[spark] val STORAGE_DECOMMISSION_FALLBACK_STORAGE_PATH =
+    ConfigBuilder("spark.storage.decommission.fallbackStorage.path")
+      .doc("The location for fallback storage during block manager decommissioning. " +
+        "For example, `s3a://spark-storage/`. In case of empty, fallback storage is disabled. " +
+        "The storage should be managed by TTL because Spark will not clean it up.")
+      .version("3.1.0")
+      .stringConf
+      .checkValue(_.endsWith(java.io.File.separator), "Path should end with separator.")
+      .createOptional
+
   private[spark] val STORAGE_REPLICATION_TOPOLOGY_FILE =
     ConfigBuilder("spark.storage.replication.topologyFile")
       .version("2.1.0")
@@ -1799,6 +1809,16 @@ package object config {
 
   private[spark] val FILES = ConfigBuilder("spark.files")
     .version("1.0.0")
+    .stringConf
+    .toSequence
+    .createWithDefault(Nil)
+
+  private[spark] val ARCHIVES = ConfigBuilder("spark.archives")
+    .version("3.1.0")
+    .doc("Comma-separated list of archives to be extracted into the working directory of each " +
+      "executor. .jar, .tar.gz, .tgz and .zip are supported. You can specify the directory " +
+      "name to unpack via adding '#' after the file name to unpack, for example, " +
+      "'file.zip#directory'. This configuration is experimental.")
     .stringConf
     .toSequence
     .createWithDefault(Nil)
