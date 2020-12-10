@@ -316,21 +316,6 @@ case class AlterTableSerDePropertiesStatement(
     partitionSpec: Option[TablePartitionSpec]) extends ParsedStatement
 
 /**
- * ALTER VIEW ... SET TBLPROPERTIES command, as parsed from SQL.
- */
-case class AlterViewSetPropertiesStatement(
-    viewName: Seq[String],
-    properties: Map[String, String]) extends ParsedStatement
-
-/**
- * ALTER VIEW ... UNSET TBLPROPERTIES command, as parsed from SQL.
- */
-case class AlterViewUnsetPropertiesStatement(
-    viewName: Seq[String],
-    propertyKeys: Seq[String],
-    ifExists: Boolean) extends ParsedStatement
-
-/**
  * ALTER VIEW ... Query command, as parsed from SQL.
  */
 case class AlterViewAsStatement(
@@ -382,11 +367,6 @@ case class CreateNamespaceStatement(
  * A USE statement, as parsed from SQL.
  */
 case class UseStatement(isNamespaceSet: Boolean, nameParts: Seq[String]) extends ParsedStatement
-
-/**
- * A REPAIR TABLE statement, as parsed from SQL
- */
-case class RepairTableStatement(tableName: Seq[String]) extends ParsedStatement
 
 /**
  * A TRUNCATE TABLE statement, as parsed from SQL

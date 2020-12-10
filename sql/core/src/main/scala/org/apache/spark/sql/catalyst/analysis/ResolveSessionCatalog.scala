@@ -209,12 +209,11 @@ class ResolveSessionCatalog(
         createAlterTable(nameParts, catalog, tbl, changes)
       }
 
-    // ALTER VIEW should always use v1 command if the resolved catalog is session catalog.
-    case AlterViewSetPropertiesStatement(SessionCatalogAndTable(_, tbl), props) =>
-      AlterTableSetPropertiesCommand(tbl.asTableIdentifier, props, isView = true)
+    case AlterViewSetProperties(ResolvedView(ident, _), props) =>
+      AlterTableSetPropertiesCommand(ident.asTableIdentifier, props, isView = true)
 
-    case AlterViewUnsetPropertiesStatement(SessionCatalogAndTable(_, tbl), keys, ifExists) =>
-      AlterTableUnsetPropertiesCommand(tbl.asTableIdentifier, keys, ifExists, isView = true)
+    case AlterViewUnsetProperties(ResolvedView(ident, _), keys, ifExists) =>
+      AlterTableUnsetPropertiesCommand(ident.asTableIdentifier, keys, ifExists, isView = true)
 
     case d @ DescribeNamespace(SessionCatalogAndNamespace(_, ns), _) =>
       if (ns.length != 1) {
@@ -408,11 +407,8 @@ class ResolveSessionCatalog(
     case AnalyzeColumn(ResolvedV1TableOrViewIdentifier(ident), columnNames, allColumns) =>
       AnalyzeColumnCommand(ident.asTableIdentifier, columnNames, allColumns)
 
-    case RepairTableStatement(tbl) =>
-      val v1TableName = parseV1Table(tbl, "MSCK REPAIR TABLE")
-      AlterTableRecoverPartitionsCommand(
-        v1TableName.asTableIdentifier,
-        "MSCK REPAIR TABLE")
+    case RepairTable(ResolvedV1TableIdentifier(ident)) =>
+      AlterTableRecoverPartitionsCommand(ident.asTableIdentifier, "MSCK REPAIR TABLE")
 
     case LoadData(ResolvedV1TableIdentifier(ident), path, isLocal, isOverwrite, partition) =>
       LoadDataCommand(
