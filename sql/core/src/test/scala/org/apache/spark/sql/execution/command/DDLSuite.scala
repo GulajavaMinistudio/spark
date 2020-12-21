@@ -29,7 +29,7 @@ import org.apache.spark.internal.config
 import org.apache.spark.internal.config.RDD_PARALLEL_LISTING_THRESHOLD
 import org.apache.spark.sql.{AnalysisException, QueryTest, Row, SaveMode}
 import org.apache.spark.sql.catalyst.{FunctionIdentifier, QualifiedTableName, TableIdentifier}
-import org.apache.spark.sql.catalyst.analysis.{FunctionRegistry, NoSuchDatabaseException, NoSuchFunctionException, NoSuchPartitionException, NoSuchTableException, TempTableAlreadyExistsException}
+import org.apache.spark.sql.catalyst.analysis.{FunctionRegistry, NoSuchDatabaseException, NoSuchFunctionException, NoSuchPartitionException, TempTableAlreadyExistsException}
 import org.apache.spark.sql.catalyst.catalog._
 import org.apache.spark.sql.catalyst.catalog.CatalogTypes.TablePartitionSpec
 import org.apache.spark.sql.connector.catalog.SupportsNamespaces.PROP_OWNER
@@ -336,10 +336,6 @@ abstract class DDLSuite extends QueryTest with SQLTestUtils {
 
   test("alter table: rename partition (datasource table)") {
     testRenamePartitions(isDatasourceTable = true)
-  }
-
-  test("drop table - data source table") {
-    testDropTable(isDatasourceTable = true)
   }
 
   test("the qualified path of a database is stored in the catalog") {
@@ -1332,23 +1328,6 @@ abstract class DDLSuite extends QueryTest with SQLTestUtils {
     assert(catalog.listTables("default") == Nil)
   }
 
-  protected def testDropTable(isDatasourceTable: Boolean): Unit = {
-    if (!isUsingHiveMetastore) {
-      assert(isDatasourceTable, "InMemoryCatalog only supports data source tables")
-    }
-    val catalog = spark.sessionState.catalog
-    val tableIdent = TableIdentifier("tab1", Some("dbx"))
-    createDatabase(catalog, "dbx")
-    createTable(catalog, tableIdent, isDatasourceTable)
-    assert(catalog.listTables("dbx") == Seq(tableIdent))
-    sql("DROP TABLE dbx.tab1")
-    assert(catalog.listTables("dbx") == Nil)
-    sql("DROP TABLE IF EXISTS dbx.tab1")
-    intercept[AnalysisException] {
-      sql("DROP TABLE dbx.tab1")
-    }
-  }
-
   test("drop view") {
     val catalog = spark.sessionState.catalog
     val tableIdent = TableIdentifier("tab1", Some("dbx"))
@@ -1642,9 +1621,10 @@ abstract class DDLSuite extends QueryTest with SQLTestUtils {
       Set(Map("a" -> "10", "b" -> "p"), Map("a" -> "20", "b" -> "c"), Map("a" -> "3", "b" -> "p")))
 
     // table to alter does not exist
-    intercept[NoSuchTableException] {
+    val e = intercept[AnalysisException] {
       sql("ALTER TABLE does_not_exist PARTITION (c='3') RENAME TO PARTITION (c='333')")
     }
+    assert(e.getMessage.contains("Table not found: does_not_exist"))
 
     // partition to rename does not exist
     intercept[NoSuchPartitionException] {
