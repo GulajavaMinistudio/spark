@@ -621,7 +621,8 @@ case class DescribeTableCommand(
         throw new AnalysisException(
           s"DESC PARTITION is not allowed on a temporary view: ${table.identifier}")
       }
-      describeSchema(catalog.lookupRelation(table).schema, result, header = false)
+      val schema = catalog.getTempViewOrPermanentTableMetadata(table).schema
+      describeSchema(schema, result, header = false)
     } else {
       val metadata = catalog.getTableRawMetadata(table)
       if (metadata.schema.isEmpty) {
@@ -968,10 +969,8 @@ case class ShowColumnsCommand(
  */
 case class ShowPartitionsCommand(
     tableName: TableIdentifier,
+    override val output: Seq[Attribute],
     spec: Option[TablePartitionSpec]) extends RunnableCommand {
-  override val output: Seq[Attribute] = {
-    AttributeReference("partition", StringType, nullable = false)() :: Nil
-  }
 
   override def run(sparkSession: SparkSession): Seq[Row] = {
     val catalog = sparkSession.sessionState.catalog
