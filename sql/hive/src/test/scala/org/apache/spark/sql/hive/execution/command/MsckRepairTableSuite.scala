@@ -15,13 +15,12 @@
  * limitations under the License.
  */
 
-package org.apache.spark.sql.execution.datasources.jdbc.connection
+package org.apache.spark.sql.hive.execution.command
 
-class OracleConnectionProviderSuite extends ConnectionProviderSuiteBase {
-  test("setAuthenticationConfig must set authentication all the time") {
-    val provider = new OracleConnectionProvider()
-    val driver = registerDriver(provider.driverClass)
+import org.apache.spark.sql.execution.command.v1
 
-    testSecureConnectionProvider(provider, driver, options("jdbc:oracle:thin:@//localhost/xe"))
-  }
-}
+/**
+ * The class contains tests for the `MSCK REPAIR TABLE` command to check
+ * V1 Hive external table catalog.
+ */
+class MsckRepairTableSuite extends v1.MsckRepairTableSuiteBase with CommandSuiteBase
