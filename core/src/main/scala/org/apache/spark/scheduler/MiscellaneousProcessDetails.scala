@@ -14,27 +14,17 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
+package org.apache.spark.scheduler
 
-package org.apache.spark.sql.catalyst.trees
+import org.apache.spark.annotation.DeveloperApi
 
-// Enums for commonly encountered tree patterns in rewrite rules.
-object TreePattern extends Enumeration  {
-  type TreePattern = Value
+/**
+ * :: DeveloperApi ::
+ * Stores information about an Miscellaneous Process to pass from the scheduler to SparkListeners.
+ */
 
-  // Enum Ids start from 0.
-  // Expression patterns (alphabetically ordered)
-  val ATTRIBUTE_REFERENCE = Value(0)
-  val EXPRESSION_WITH_RANDOM_SEED = Value
-  val IN: Value = Value
-  val LITERAL: Value = Value
-  val NULL_LITERAL: Value = Value
-  val TRUE_OR_FALSE_LITERAL: Value = Value
-  val WINDOW_EXPRESSION: Value = Value
-
-  // Logical plan patterns (alphabetically ordered)
-  val INNER_LIKE_JOIN: Value = Value
-  val JOIN: Value = Value
-  val LEFT_SEMI_OR_ANTI_JOIN: Value = Value
-  val NATURAL_LIKE_JOIN: Value = Value
-  val OUTER_JOIN: Value = Value
-}
+@DeveloperApi
+class MiscellaneousProcessDetails(
+    val hostPort: String,
+    val cores: Int,
+    val logUrlInfo: Map[String, String]) extends Serializable
