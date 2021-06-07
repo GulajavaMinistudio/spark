@@ -103,7 +103,8 @@ class BooleanOpsTest(PandasOnSparkTestCase, TestCasesUtils):
 
         with option_context("compute.ops_on_diff_frames", True):
             self.assert_eq(
-                self.pser / self.float_pser, (self.psser / self.float_psser).sort_index())
+                self.pser / self.float_pser, (self.psser / self.float_psser).sort_index()
+            )
 
             for psser in self.non_numeric_pssers.values():
                 self.assertRaises(TypeError, lambda: self.psser / psser)
@@ -228,6 +229,13 @@ class BooleanOpsTest(PandasOnSparkTestCase, TestCasesUtils):
         self.assertRaises(TypeError, lambda: datetime.date(1994, 1, 1) % self.psser)
         self.assertRaises(TypeError, lambda: True % self.psser)
 
+    def test_from_to_pandas(self):
+        data = [True, True, False]
+        pser = pd.Series(data)
+        psser = ps.Series(data)
+        self.assert_eq(pser, psser.to_pandas())
+        self.assert_eq(ps.from_pandas(pser), psser)
+
 
 if __name__ == "__main__":
     import unittest
@@ -235,7 +243,8 @@ if __name__ == "__main__":
 
     try:
         import xmlrunner  # type: ignore[import]
-        testRunner = xmlrunner.XMLTestRunner(output='target/test-reports', verbosity=2)
+
+        testRunner = xmlrunner.XMLTestRunner(output="target/test-reports", verbosity=2)
     except ImportError:
         testRunner = None
     unittest.main(testRunner=testRunner, verbosity=2)
