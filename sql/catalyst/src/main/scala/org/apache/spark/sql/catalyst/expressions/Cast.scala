@@ -68,9 +68,11 @@ object Cast {
     case (BooleanType, TimestampType) => true
     case (DateType, TimestampType) => true
     case (_: NumericType, TimestampType) => true
+    case (TimestampWithoutTZType, TimestampType) => true
 
     case (StringType, DateType) => true
     case (TimestampType, DateType) => true
+    case (TimestampWithoutTZType, DateType) => true
 
     case (StringType, CalendarIntervalType) => true
     case (StringType, DayTimeIntervalType) => true
@@ -491,6 +493,7 @@ abstract class CastBase extends UnaryExpression with TimeZoneAwareExpression wit
       buildCast[Byte](_, b => longToTimestamp(b.toLong))
     case DateType =>
       buildCast[Int](_, d => daysToMicros(d, zoneId))
+    case TimestampWithoutTZType => buildCast[Long](_, ts => ts)
     // TimestampWritable.decimalToTimestamp
     case DecimalType() =>
       buildCast[Decimal](_, d => decimalToTimestamp(d))
@@ -532,6 +535,8 @@ abstract class CastBase extends UnaryExpression with TimeZoneAwareExpression wit
       // throw valid precision more than seconds, according to Hive.
       // Timestamp.nanos is in 0 to 999,999,999, no more than a second.
       buildCast[Long](_, t => microsToDays(t, zoneId))
+    case TimestampWithoutTZType =>
+      buildCast[Long](_, t => microsToDays(t, ZoneOffset.UTC))
   }
 
   // IntervalConverter
@@ -1202,6 +1207,11 @@ abstract class CastBase extends UnaryExpression with TimeZoneAwareExpression wit
         (c, evPrim, evNull) =>
           code"""$evPrim =
             org.apache.spark.sql.catalyst.util.DateTimeUtils.microsToDays($c, $zid);"""
+      case TimestampWithoutTZType =>
+        (c, evPrim, evNull) =>
+          // scalastyle:off line.size.limit
+          code"$evPrim = org.apache.spark.sql.catalyst.util.DateTimeUtils.microsToDays($c, java.time.ZoneOffset.UTC);"
+          // scalastyle:on line.size.limit
       case _ =>
         (c, evPrim, evNull) => code"$evNull = true;"
     }
@@ -1337,6 +1347,8 @@ abstract class CastBase extends UnaryExpression with TimeZoneAwareExpression wit
       (c, evPrim, evNull) =>
         code"""$evPrim =
           org.apache.spark.sql.catalyst.util.DateTimeUtils.daysToMicros($c, $zid);"""
+    case TimestampWithoutTZType =>
+      (c, evPrim, evNull) => code"$evPrim = $c;"
     case DecimalType() =>
       (c, evPrim, evNull) => code"$evPrim = ${decimalToTimestampCode(c)};"
     case DoubleType =>
@@ -1941,6 +1953,7 @@ object AnsiCast {
 
     case (StringType, TimestampType) => true
     case (DateType, TimestampType) => true
+    case (TimestampWithoutTZType, TimestampType) => true
 
     case (StringType, _: CalendarIntervalType) => true
     case (StringType, DayTimeIntervalType) => true
@@ -1948,6 +1961,7 @@ object AnsiCast {
 
     case (StringType, DateType) => true
     case (TimestampType, DateType) => true
+    case (TimestampWithoutTZType, DateType) => true
 
     case (_: NumericType, _: NumericType) => true
     case (StringType, _: NumericType) => true
