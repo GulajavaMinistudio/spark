@@ -67,6 +67,16 @@ class CategoricalIndexTest(PandasOnSparkTestCase, TestUtils):
         self.assert_eq(psidx.codes, pd.Index(pidx.codes))
         self.assert_eq(psidx.ordered, pidx.ordered)
 
+    def test_as_ordered_unordered(self):
+        pidx = pd.CategoricalIndex(["x", "y", "z"], categories=["z", "y", "x"])
+        psidx = ps.from_pandas(pidx)
+
+        self.assert_eq(pidx.as_ordered(), psidx.as_ordered())
+        self.assert_eq(pidx.as_unordered(), psidx.as_unordered())
+
+        self.assertRaises(ValueError, lambda: psidx.as_ordered(inplace=True))
+        self.assertRaises(ValueError, lambda: psidx.as_unordered(inplace=True))
+
     def test_astype(self):
         pidx = pd.Index(["a", "b", "c"])
         psidx = ps.from_pandas(pidx)
@@ -159,13 +169,25 @@ class CategoricalIndexTest(PandasOnSparkTestCase, TestUtils):
         psidx2 = ps.from_pandas(pidx2)
         psidx3 = ps.from_pandas(pidx3)
 
-        self.assert_eq(
-            psidx1.intersection(psidx2).sort_values(), pidx1.intersection(pidx2).sort_values()
-        )
-        self.assert_eq(
-            psidx1.intersection(psidx3.astype("category")).sort_values(),
-            pidx1.intersection(pidx3.astype("category")).sort_values(),
-        )
+        if LooseVersion(pd.__version__) >= LooseVersion("1.2"):
+            self.assert_eq(
+                psidx1.intersection(psidx2).sort_values(), pidx1.intersection(pidx2).sort_values()
+            )
+            self.assert_eq(
+                psidx1.intersection(psidx3.astype("category")).sort_values(),
+                pidx1.intersection(pidx3.astype("category")).sort_values(),
+            )
+        else:
+            self.assert_eq(
+                psidx1.intersection(psidx2).sort_values(),
+                pidx1.intersection(pidx2).set_categories(pidx1.categories).sort_values(),
+            )
+            self.assert_eq(
+                psidx1.intersection(psidx3.astype("category")).sort_values(),
+                pidx1.intersection(pidx3.astype("category"))
+                .set_categories(pidx1.categories)
+                .sort_values(),
+            )
 
         # TODO: intersection non-categorical or categorical with a different category
         self.assertRaises(NotImplementedError, lambda: psidx1.intersection(psidx3))

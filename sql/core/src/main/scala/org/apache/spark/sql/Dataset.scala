@@ -1948,31 +1948,6 @@ class Dataset[T] private[sql](
   }
 
   /**
-   * Observe (named) metrics through an [[org.apache.spark.sql.Observation]] instance.
-   * This is equivalent to calling [[Dataset.observe(String, Column, Column*)]] but does
-   * not require adding [[org.apache.spark.sql.util.QueryExecutionListener]] to the spark session.
-   * This method does not support streaming datasets.
-   *
-   * A user can retrieve the metrics by accessing [[org.apache.spark.sql.Observation.get]].
-   *
-   * {{{
-   *   // Observe row count (rows) and highest id (maxid) in the Dataset while writing it
-   *   val observation = Observation("my_metrics")
-   *   val observed_ds = ds.observe(observation, count(lit(1)).as("rows"), max($"id").as("maxid"))
-   *   observed_ds.write.parquet("ds.parquet")
-   *   val metrics = observation.get
-   * }}}
-   *
-   * @throws IllegalArgumentException If this is a streaming Dataset (this.isStreaming == true)
-   *
-   * @group typedrel
-   * @since 3.3.0
-   */
-  def observe(observation: Observation, expr: Column, exprs: Column*): Dataset[T] = {
-    observation.on(this, expr, exprs: _*)
-  }
-
-  /**
    * Returns a new Dataset by taking the first `n` rows. The difference between this function
    * and `head` is that `head` is an action and returns an array (by triggering query execution)
    * while `limit` returns a new Dataset.
@@ -2431,10 +2406,10 @@ class Dataset[T] private[sql](
     val resolver = sparkSession.sessionState.analyzer.resolver
     val output = queryExecution.analyzed.output
 
-    val columnMap = colNames.zip(cols).toMap
+    val columnSeq = colNames.zip(cols)
 
     val replacedAndExistingColumns = output.map { field =>
-      columnMap.find { case (colName, _) =>
+      columnSeq.find { case (colName, _) =>
         resolver(field.name, colName)
       } match {
         case Some((colName: String, col: Column)) => col.as(colName)
@@ -2442,7 +2417,7 @@ class Dataset[T] private[sql](
       }
     }
 
-    val newColumns = columnMap.filter { case (colName, col) =>
+    val newColumns = columnSeq.filter { case (colName, col) =>
       !output.exists(f => resolver(f.name, colName))
     }.map { case (colName, col) => col.as(colName) }
 
