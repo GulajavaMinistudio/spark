@@ -376,8 +376,8 @@ object SparkBuild extends PomBuild {
 
   val mimaProjects = allProjects.filterNot { x =>
     Seq(
-      spark, hive, hiveThriftServer, catalyst, repl, networkCommon, networkShuffle, networkYarn,
-      unsafe, tags, tokenProviderKafka010, sqlKafka010, kvstore, avro
+      spark, hive, hiveThriftServer, repl, networkCommon, networkShuffle, networkYarn,
+      unsafe, tags, tokenProviderKafka010, sqlKafka010
     ).contains(x)
   }
 
@@ -639,12 +639,13 @@ object KubernetesIntegrationTests {
       if (shouldBuildImage) {
         val dockerTool = s"$sparkHome/bin/docker-image-tool.sh"
         val bindingsDir = s"$sparkHome/resource-managers/kubernetes/docker/src/main/dockerfiles/spark/bindings"
-        val dockerFile = sys.props.get("spark.kubernetes.test.dockerFile")
-        val javaImageTag = sys.props.getOrElse("spark.kubernetes.test.javaImageTag", "8-jre-slim")
-        val extraOptions = if (dockerFile.isDefined) {
-          Seq("-f", s"${dockerFile.get}")
-        } else {
+        val javaImageTag = sys.props.get("spark.kubernetes.test.javaImageTag")
+        val dockerFile = sys.props.getOrElse("spark.kubernetes.test.dockerFile",
+            "resource-managers/kubernetes/docker/src/main/dockerfiles/spark/Dockerfile.java17")
+        val extraOptions = if (javaImageTag.isDefined) {
           Seq("-b", s"java_image_tag=$javaImageTag")
+        } else {
+          Seq("-f", s"$dockerFile")
         }
         val cmd = Seq(dockerTool,
           "-t", imageTag.value,
