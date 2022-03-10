@@ -14,5 +14,10 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 #
-
-org.apache.spark.sql.execution.history.SQLEventFilterBuilder
+apiVersion: scheduling.volcano.sh/v1beta1
+kind: PodGroup
+spec:
+  queue: queue-2u-3g
+  minMember: 1
+  minResources:
+    cpu: "2"

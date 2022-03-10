@@ -14,5 +14,12 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 #
-
-org.apache.spark.sql.execution.history.SQLEventFilterBuilder
+apiVersion: scheduling.volcano.sh/v1beta1
+kind: Queue
+metadata:
+  name: queue-2u-3g
+spec:
+  weight: 1
+  capability:
+    cpu: "2"
+    memory: "3Gi"
