@@ -165,13 +165,16 @@ object QueryExecutionErrors {
       messageParameters = Array(index.toString, numElements.toString, SQLConf.ANSI_ENABLED.key))
   }
 
-  def mapKeyNotExistError(key: Any, isElementAtFunction: Boolean): NoSuchElementException = {
+  def mapKeyNotExistError(
+      key: Any,
+      isElementAtFunction: Boolean,
+      context: String): NoSuchElementException = {
     if (isElementAtFunction) {
       new SparkNoSuchElementException(errorClass = "MAP_KEY_DOES_NOT_EXIST_IN_ELEMENT_AT",
-        messageParameters = Array(key.toString, SQLConf.ANSI_ENABLED.key))
+        messageParameters = Array(key.toString, SQLConf.ANSI_ENABLED.key, context))
     } else {
       new SparkNoSuchElementException(errorClass = "MAP_KEY_DOES_NOT_EXIST",
-        messageParameters = Array(key.toString, SQLConf.ANSI_STRICT_INDEX_OPERATOR.key))
+        messageParameters = Array(key.toString, SQLConf.ANSI_STRICT_INDEX_OPERATOR.key, context))
     }
   }
 
@@ -430,9 +433,8 @@ object QueryExecutionErrors {
       hint: String = "",
       errorContext: String = ""): ArithmeticException = {
     val alternative = if (hint.nonEmpty) s" To return NULL instead, use '$hint'." else ""
-    new ArithmeticException(s"$message.$alternative If necessary set " +
-      s"${SQLConf.ANSI_ENABLED.key} to false (except for ANSI interval type) to bypass this " +
-      "error." + errorContext)
+    new SparkArithmeticException("ARITHMETIC_OVERFLOW",
+      Array(message, alternative, SQLConf.ANSI_ENABLED.key, errorContext))
   }
 
   def unaryMinusCauseOverflowError(originValue: AnyVal): ArithmeticException = {
