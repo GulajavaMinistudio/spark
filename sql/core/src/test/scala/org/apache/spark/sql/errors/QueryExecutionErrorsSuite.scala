@@ -21,7 +21,7 @@ import java.util.Locale
 
 import test.org.apache.spark.sql.connector.JavaSimpleWritableDataSource
 
-import org.apache.spark.{SparkArithmeticException, SparkException, SparkIllegalStateException, SparkRuntimeException, SparkUnsupportedOperationException, SparkUpgradeException}
+import org.apache.spark.{SparkArithmeticException, SparkDateTimeException, SparkException, SparkIllegalStateException, SparkRuntimeException, SparkUnsupportedOperationException, SparkUpgradeException}
 import org.apache.spark.sql.{DataFrame, QueryTest}
 import org.apache.spark.sql.catalyst.util.BadRecordException
 import org.apache.spark.sql.connector.SimpleWritableDataSource
@@ -66,8 +66,8 @@ class QueryExecutionErrorsSuite extends QueryTest
       assert(e.getErrorClass === "INVALID_PARAMETER_VALUE")
       assert(e.getSqlState === "22023")
       assert(e.getMessage.matches(
-        "The value of parameter\\(s\\) 'key' in the aes_encrypt/aes_decrypt function is invalid: " +
-        "expects a binary value with 16, 24 or 32 bytes, but got \\d+ bytes."))
+        "The value of parameter\\(s\\) 'key' in the `aes_encrypt`/`aes_decrypt` function " +
+        "is invalid: expects a binary value with 16, 24 or 32 bytes, but got \\d+ bytes."))
     }
 
     // Encryption failure - invalid key length
@@ -100,7 +100,7 @@ class QueryExecutionErrorsSuite extends QueryTest
       assert(e.getErrorClass === "INVALID_PARAMETER_VALUE")
       assert(e.getSqlState === "22023")
       assert(e.getMessage ===
-        "The value of parameter(s) 'expr, key' in the aes_encrypt/aes_decrypt function " +
+        "The value of parameter(s) 'expr, key' in the `aes_encrypt`/`aes_decrypt` function " +
         "is invalid: Detail message: " +
         "Given final block not properly padded. " +
         "Such issues can arise if a bad key is used during decryption.")
@@ -118,7 +118,7 @@ class QueryExecutionErrorsSuite extends QueryTest
       assert(e.getErrorClass === "UNSUPPORTED_FEATURE")
       assert(e.getSqlState === "0A000")
       assert(e.getMessage.matches("""The feature is not supported: AES-\w+ with the padding \w+""" +
-        " by the aes_encrypt/aes_decrypt function."))
+        " by the `aes_encrypt`/`aes_decrypt` function."))
     }
 
     // Unsupported AES mode and padding in encrypt
@@ -386,6 +386,18 @@ class QueryExecutionErrorsSuite extends QueryTest
             |select 6/0
             |       ^^^
             |""".stripMargin)
+    }
+  }
+
+  test("INVALID_FRACTION_OF_SECOND: in the function make_timestamp") {
+    withSQLConf(SQLConf.ANSI_ENABLED.key -> "true") {
+      val e = intercept[SparkDateTimeException] {
+        sql("select make_timestamp(2012, 11, 30, 9, 19, 60.66666666)").collect()
+      }
+      assert(e.getErrorClass === "INVALID_FRACTION_OF_SECOND")
+      assert(e.getSqlState === "22023")
+      assert(e.getMessage === "The fraction of sec must be zero. Valid range is [0, 60]. " +
+        "If necessary set spark.sql.ansi.enabled to false to bypass this error. ")
     }
   }
 }
