@@ -398,8 +398,7 @@ class QueryCompilationErrorsSuite
     }
   }
 
-  test("INVALID_JSON_SCHEMA_MAPTYPE: " +
-    "Parse JSON rows can only contain StringType as a key type for a MapType.") {
+  test("INVALID_JSON_SCHEMA_MAP_TYPE: only STRING as a key type for MAP") {
     val schema = StructType(
       StructField("map", MapType(IntegerType, IntegerType, true), false) :: Nil)
 
@@ -407,10 +406,9 @@ class QueryCompilationErrorsSuite
       exception = intercept[AnalysisException] {
         spark.read.schema(schema).json(spark.emptyDataset[String])
       },
-      errorClass = "INVALID_JSON_SCHEMA_MAPTYPE",
-      msg = "Input schema " +
-        "StructType(StructField(map,MapType(IntegerType,IntegerType,true),false)) " +
-        "can only contain StringType as a key type for a MapType."
+      errorClass = "INVALID_JSON_SCHEMA_MAP_TYPE",
+      msg = """Input schema "STRUCT<map: MAP<INT, INT>>" """ +
+        "can only contain STRING as a key type for a MAP."
     )
   }
 
@@ -512,6 +510,20 @@ class QueryCompilationErrorsSuite
       errorClass = "PIVOT_VALUE_DATA_TYPE_MISMATCH",
       msg = "Invalid pivot value 'struct(col1, dotnet, col2, Experts)': value data type " +
         "struct<col1:string,col2:string> does not match pivot column data type int")
+  }
+
+  test("INVALID_FIELD_NAME: add a nested field for not struct parent") {
+    withTable("t") {
+      sql("CREATE TABLE t(c struct<x:string>, m string) USING parquet")
+
+      val e = intercept[AnalysisException] {
+        sql("ALTER TABLE t ADD COLUMNS (m.n int)")
+      }
+      checkErrorClass(
+        exception = e,
+        errorClass = "INVALID_FIELD_NAME",
+        msg = "Field name m.n is invalid: m is not a struct.; line 1 pos 27")
+    }
   }
 }
 
