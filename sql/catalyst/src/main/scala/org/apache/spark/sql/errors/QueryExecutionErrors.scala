@@ -34,7 +34,7 @@ import org.apache.hadoop.fs.permission.FsPermission
 import org.codehaus.commons.compiler.CompileException
 import org.codehaus.janino.InternalCompilerException
 
-import org.apache.spark.{Partition, SparkArithmeticException, SparkArrayIndexOutOfBoundsException, SparkClassNotFoundException, SparkConcurrentModificationException, SparkDateTimeException, SparkException, SparkFileAlreadyExistsException, SparkFileNotFoundException, SparkIllegalArgumentException, SparkIllegalStateException, SparkIndexOutOfBoundsException, SparkNoSuchElementException, SparkNoSuchMethodException, SparkNumberFormatException, SparkRuntimeException, SparkSecurityException, SparkSQLException, SparkSQLFeatureNotSupportedException, SparkUnsupportedOperationException, SparkUpgradeException}
+import org.apache.spark.{Partition, SparkArithmeticException, SparkArrayIndexOutOfBoundsException, SparkClassNotFoundException, SparkConcurrentModificationException, SparkDateTimeException, SparkException, SparkFileAlreadyExistsException, SparkFileNotFoundException, SparkIllegalArgumentException, SparkIndexOutOfBoundsException, SparkNoSuchElementException, SparkNoSuchMethodException, SparkNumberFormatException, SparkRuntimeException, SparkSecurityException, SparkSQLException, SparkSQLFeatureNotSupportedException, SparkUnsupportedOperationException, SparkUpgradeException}
 import org.apache.spark.executor.CommitDeniedException
 import org.apache.spark.launcher.SparkLauncher
 import org.apache.spark.memory.SparkOutOfMemoryError
@@ -68,17 +68,6 @@ import org.apache.spark.util.CircularBuffer
  */
 object QueryExecutionErrors extends QueryErrorsBase {
 
-  def internalMissingTimezoneIdError(): Throwable = {
-    new SparkIllegalStateException(errorClass = "INTERNAL_ERROR",
-      messageParameters = Array("Missing timezoneId where it is mandatory."))
-  }
-
-  def logicalHintOperatorNotRemovedDuringAnalysisError(): Throwable = {
-    new SparkIllegalStateException(errorClass = "INTERNAL_ERROR",
-      messageParameters = Array(
-        "Internal error: logical hint operator should have been removed during analysis"))
-  }
-
   def cannotEvaluateExpressionError(expression: Expression): Throwable = {
     new SparkUnsupportedOperationException(errorClass = "INTERNAL_ERROR",
       messageParameters = Array(s"Cannot evaluate expression: $expression"))
@@ -95,9 +84,13 @@ object QueryExecutionErrors extends QueryErrorsBase {
   }
 
   def castingCauseOverflowError(t: Any, from: DataType, to: DataType): ArithmeticException = {
-    new SparkArithmeticException(errorClass = "CAST_CAUSES_OVERFLOW",
+    new SparkArithmeticException(
+      errorClass = "CAST_OVERFLOW",
       messageParameters = Array(
-        toSQLValue(t, from), toSQLType(to), toSQLConf(SQLConf.ANSI_ENABLED.key)))
+        toSQLValue(t, from),
+        toSQLType(from),
+        toSQLType(to),
+        toSQLConf(SQLConf.ANSI_ENABLED.key)))
   }
 
   def cannotChangeDecimalPrecisionError(
@@ -115,13 +108,46 @@ object QueryExecutionErrors extends QueryErrorsBase {
         context))
   }
 
-  def invalidInputSyntaxForNumericError(
+  def invalidInputInCastToDatetimeError(
+      value: Any,
+      from: DataType,
+      to: DataType,
+      errorContext: String): Throwable = {
+    new SparkDateTimeException(
+      errorClass = "CAST_INVALID_INPUT",
+      messageParameters = Array(
+        toSQLValue(value, from),
+        toSQLType(from),
+        toSQLType(to),
+        toSQLConf(SQLConf.ANSI_ENABLED.key),
+        errorContext))
+  }
+
+  def invalidInputSyntaxForBooleanError(
+      s: UTF8String,
+      errorContext: String): SparkRuntimeException = {
+    new SparkRuntimeException(
+      errorClass = "CAST_INVALID_INPUT",
+      messageParameters = Array(
+        toSQLValue(s, StringType),
+        toSQLType(StringType),
+        toSQLType(BooleanType),
+        toSQLConf(SQLConf.ANSI_ENABLED.key),
+        errorContext))
+  }
+
+  def invalidInputInCastToNumberError(
       to: DataType,
       s: UTF8String,
       errorContext: String): SparkNumberFormatException = {
-    new SparkNumberFormatException(errorClass = "INVALID_SYNTAX_FOR_CAST",
-      messageParameters = Array(toSQLType(to), toSQLValue(s, StringType),
-        SQLConf.ANSI_ENABLED.key, errorContext))
+    new SparkNumberFormatException(
+      errorClass = "CAST_INVALID_INPUT",
+      messageParameters = Array(
+        toSQLValue(s, StringType),
+        toSQLType(StringType),
+        toSQLType(to),
+        toSQLConf(SQLConf.ANSI_ENABLED.key),
+        errorContext))
   }
 
   def cannotCastFromNullTypeError(to: DataType): Throwable = {
@@ -135,7 +161,8 @@ object QueryExecutionErrors extends QueryErrorsBase {
   }
 
   def cannotParseDecimalError(): Throwable = {
-    new SparkIllegalStateException(errorClass = "CANNOT_PARSE_DECIMAL",
+    new SparkRuntimeException(
+      errorClass = "CANNOT_PARSE_DECIMAL",
       messageParameters = Array.empty)
   }
 
@@ -187,8 +214,12 @@ object QueryExecutionErrors extends QueryErrorsBase {
   }
 
   def mapKeyNotExistError(key: Any, dataType: DataType, context: String): NoSuchElementException = {
-    new SparkNoSuchElementException(errorClass = "MAP_KEY_DOES_NOT_EXIST",
-      messageParameters = Array(toSQLValue(key, dataType), SQLConf.ANSI_ENABLED.key, context))
+    new SparkNoSuchElementException(
+      errorClass = "MAP_KEY_DOES_NOT_EXIST",
+      messageParameters = Array(
+        toSQLValue(key, dataType),
+        toSQLConf(SQLConf.ANSI_ENABLED.key),
+        context))
   }
 
   def invalidFractionOfSecondError(): DateTimeException = {
@@ -530,9 +561,9 @@ object QueryExecutionErrors extends QueryErrorsBase {
         "READ_ANCIENT_DATETIME",
         format,
         toSQLConf(config),
-        option,
+        toDSOption(option),
         toSQLConf(config),
-        option),
+        toDSOption(option)),
       cause = null
     )
   }
@@ -816,7 +847,7 @@ object QueryExecutionErrors extends QueryErrorsBase {
          |Could not execute broadcast in $timeout secs. You can increase the timeout
          |for broadcasts via ${SQLConf.BROADCAST_TIMEOUT.key} or disable broadcast join
          |by setting ${SQLConf.AUTO_BROADCASTJOIN_THRESHOLD.key} to -1
-       """.stripMargin.replaceAll("\n", " "), ex.getOrElse(null))
+       """.stripMargin.replaceAll("\n", " "), ex.orNull)
   }
 
   def cannotCompareCostWithTargetCostError(cost: String): Throwable = {
@@ -1013,13 +1044,6 @@ object QueryExecutionErrors extends QueryErrorsBase {
       e)
   }
 
-  def cannotCastToDateTimeError(
-      value: Any, from: DataType, to: DataType, errorContext: String): Throwable = {
-    val valueString = toSQLValue(value, from)
-    new SparkDateTimeException("INVALID_SYNTAX_FOR_CAST",
-      Array(toSQLType(to), valueString, SQLConf.ANSI_ENABLED.key, errorContext))
-  }
-
   def registeringStreamingQueryListenerError(e: Exception): Throwable = {
     new SparkException("Exception when registering StreamingQueryListener", e)
   }
@@ -1150,14 +1174,6 @@ object QueryExecutionErrors extends QueryErrorsBase {
   def userDefinedTypeNotAnnotatedAndRegisteredError(udt: UserDefinedType[_]): Throwable = {
     new SparkException(s"${udt.userClass.getName} is not annotated with " +
       "SQLUserDefinedType nor registered with UDTRegistration.}")
-  }
-
-  def invalidInputSyntaxForBooleanError(
-      s: UTF8String,
-      errorContext: String): UnsupportedOperationException = {
-    new UnsupportedOperationException(s"invalid input syntax for type boolean: $s. " +
-      s"To return NULL instead, use 'try_cast'. If necessary set ${SQLConf.ANSI_ENABLED.key} " +
-      "to false to bypass this error." + errorContext)
   }
 
   def unsupportedOperandTypeForSizeFunctionError(dataType: DataType): Throwable = {

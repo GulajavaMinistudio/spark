@@ -27,7 +27,7 @@ import org.apache.hadoop.fs.permission.FsPermission
 import org.mockito.Mockito.{mock, when}
 import test.org.apache.spark.sql.connector.JavaSimpleWritableDataSource
 
-import org.apache.spark.{SparkArithmeticException, SparkClassNotFoundException, SparkException, SparkIllegalArgumentException, SparkIllegalStateException, SparkRuntimeException, SparkSecurityException, SparkSQLException, SparkUnsupportedOperationException, SparkUpgradeException}
+import org.apache.spark.{SparkArithmeticException, SparkClassNotFoundException, SparkException, SparkIllegalArgumentException, SparkRuntimeException, SparkSecurityException, SparkSQLException, SparkUnsupportedOperationException, SparkUpgradeException}
 import org.apache.spark.sql.{AnalysisException, DataFrame, QueryTest, SaveMode}
 import org.apache.spark.sql.catalyst.util.BadRecordException
 import org.apache.spark.sql.connector.SimpleWritableDataSource
@@ -39,8 +39,7 @@ import org.apache.spark.sql.functions.{lit, lower, struct, sum, udf}
 import org.apache.spark.sql.internal.SQLConf
 import org.apache.spark.sql.internal.SQLConf.LegacyBehaviorPolicy.EXCEPTION
 import org.apache.spark.sql.jdbc.{JdbcDialect, JdbcDialects}
-import org.apache.spark.sql.types.{DataType, DecimalType, MetadataBuilder, StructType, TimestampType}
-import org.apache.spark.sql.util.ArrowUtils
+import org.apache.spark.sql.types.{DataType, DecimalType, MetadataBuilder, StructType}
 import org.apache.spark.util.Utils
 
 class QueryExecutionErrorsSuite
@@ -221,7 +220,7 @@ class QueryExecutionErrorsSuite
 
       val format = "Parquet"
       val config = "\"" + SQLConf.PARQUET_REBASE_MODE_IN_READ.key + "\""
-      val option = "datetimeRebaseMode"
+      val option = "\"datetimeRebaseMode\""
       checkErrorClass(
         exception = e,
         errorClass = "INCONSISTENT_BEHAVIOR_CROSS_VERSION",
@@ -234,10 +233,10 @@ class QueryExecutionErrorsSuite
             |Spark 2.x or legacy versions of Hive, which uses a legacy hybrid calendar
             |that is different from Spark 3.0+'s Proleptic Gregorian calendar.
             |See more details in SPARK-31404. You can set the SQL config $config or
-            |the datasource option '$option' to 'LEGACY' to rebase the datetime values
+            |the datasource option $option to "LEGACY" to rebase the datetime values
             |w.r.t. the calendar difference during reading. To read the datetime values
-            |as it is, set the SQL config $config or the datasource option '$option'
-            |to 'CORRECTED'.
+            |as it is, set the SQL config $config or the datasource option $option
+            |to "CORRECTED".
             |""".stripMargin)
     }
 
@@ -262,23 +261,14 @@ class QueryExecutionErrorsSuite
               |into $format files can be dangerous, as the files may be read by Spark 2.x
               |or legacy versions of Hive later, which uses a legacy hybrid calendar that
               |is different from Spark 3.0+'s Proleptic Gregorian calendar. See more
-              |details in SPARK-31404. You can set $config to 'LEGACY' to rebase the
+              |details in SPARK-31404. You can set $config to "LEGACY" to rebase the
               |datetime values w.r.t. the calendar difference during writing, to get maximum
-              |interoperability. Or set $config to 'CORRECTED' to write the datetime
+              |interoperability. Or set $config to "CORRECTED" to write the datetime
               |values as it is, if you are sure that the written files will only be read by
               |Spark 3.0+ or other systems that use Proleptic Gregorian calendar.
               |""".stripMargin)
       }
     }
-  }
-
-  test("INTERNAL_ERROR: timeZoneId not specified while converting TimestampType to Arrow") {
-    checkErrorClass(
-      exception = intercept[SparkIllegalStateException] {
-        ArrowUtils.toArrowSchema(new StructType().add("value", TimestampType), null)
-      },
-      errorClass = "INTERNAL_ERROR",
-      msg = "Missing timezoneId where it is mandatory.")
   }
 
   test("UNSUPPORTED_FEATURE - SPARK-36346: can't read Timestamp as TimestampNTZ") {
@@ -358,10 +348,10 @@ class QueryExecutionErrorsSuite
     assert(e3.getCause.isInstanceOf[BadRecordException])
 
     val e4 = e3.getCause.asInstanceOf[BadRecordException]
-    assert(e4.getCause.isInstanceOf[SparkIllegalStateException])
+    assert(e4.getCause.isInstanceOf[SparkRuntimeException])
 
     checkErrorClass(
-      exception = e4.getCause.asInstanceOf[SparkIllegalStateException],
+      exception = e4.getCause.asInstanceOf[SparkRuntimeException],
       errorClass = "CANNOT_PARSE_DECIMAL",
       msg = "Cannot parse decimal",
       sqlState = Some("42000"))

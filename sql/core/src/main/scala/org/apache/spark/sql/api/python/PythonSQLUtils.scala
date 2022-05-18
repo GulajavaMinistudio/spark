@@ -31,6 +31,7 @@ import org.apache.spark.sql.{Column, DataFrame, Row, SparkSession}
 import org.apache.spark.sql.catalyst.CatalystTypeConverters
 import org.apache.spark.sql.catalyst.analysis.FunctionRegistry
 import org.apache.spark.sql.catalyst.expressions._
+import org.apache.spark.sql.catalyst.expressions.aggregate._
 import org.apache.spark.sql.catalyst.parser.CatalystSqlParser
 import org.apache.spark.sql.execution.{ExplainMode, QueryExecution}
 import org.apache.spark.sql.execution.arrow.ArrowConverters
@@ -64,6 +65,9 @@ private[sql] object PythonSQLUtils extends Logging {
   def listStaticSQLConfigs(): Array[(String, String, String, String)] = {
     listAllSQLConfigs().filter(p => SQLConf.isStaticConfigKey(p._1)).toArray
   }
+
+  def isTimestampNTZPreferred: Boolean =
+    SQLConf.get.timestampType == org.apache.spark.sql.types.TimestampNTZType
 
   /**
    * Python callable function to read a file in Arrow stream format and create a [[RDD]]
@@ -121,6 +125,14 @@ private[sql] object PythonSQLUtils extends Logging {
 
   def timestampDiff(unit: String, start: Column, end: Column): Column = {
     Column(TimestampDiff(unit, start.expr, end.expr))
+  }
+
+  def pandasSkewness(e: Column): Column = {
+    Column(PandasSkewness(e.expr).toAggregateExpression(false))
+  }
+
+  def pandasKurtosis(e: Column): Column = {
+    Column(PandasKurtosis(e.expr).toAggregateExpression(false))
   }
 }
 

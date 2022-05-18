@@ -60,7 +60,15 @@ trait QueryErrorsBase {
     quoteByDefault(t.sql)
   }
 
+  def toSQLType(text: String): String = {
+    quoteByDefault(text.toUpperCase(Locale.ROOT))
+  }
+
   def toSQLConf(conf: String): String = {
     quoteByDefault(conf)
+  }
+
+  def toDSOption(option: String): String = {
+    quoteByDefault(option)
   }
 }
