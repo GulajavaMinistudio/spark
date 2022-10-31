@@ -22,20 +22,18 @@ import scala.collection.JavaConverters._
 import org.apache.spark.SparkFunSuite
 import org.apache.spark.connect.proto
 import org.apache.spark.connect.proto.Expression.UnresolvedStar
-import org.apache.spark.sql.SparkSession
 import org.apache.spark.sql.catalyst.expressions.AttributeReference
 import org.apache.spark.sql.catalyst.plans.logical.LogicalPlan
+import org.apache.spark.sql.test.SharedSparkSession
 
 /**
  * Testing trait for SparkConnect tests with some helper methods to make it easier to create new
  * test cases.
  */
-trait SparkConnectPlanTest {
-
-  def getSession(): SparkSession = None.orNull
+trait SparkConnectPlanTest extends SharedSparkSession {
 
   def transform(rel: proto.Relation): LogicalPlan = {
-    new SparkConnectPlanner(rel, getSession()).transform()
+    new SparkConnectPlanner(rel, spark).transform()
   }
 
   def readRel: proto.Relation =
@@ -158,9 +156,10 @@ class SparkConnectPlannerSuite extends SparkFunSuite with SparkConnectPlanTest {
 
   test("Simple Union") {
     intercept[AssertionError](
-      transform(proto.Relation.newBuilder.setUnion(proto.Union.newBuilder.build()).build))
+      transform(proto.Relation.newBuilder.setSetOp(proto.SetOperation.newBuilder.build()).build))
     val union = proto.Relation.newBuilder
-      .setUnion(proto.Union.newBuilder.addAllInputs(Seq(readRel, readRel).asJava).build())
+      .setSetOp(
+        proto.SetOperation.newBuilder.setLeftInput(readRel).setRightInput(readRel).build())
       .build()
     val msg = intercept[InvalidPlanInput] {
       transform(union)
@@ -169,10 +168,12 @@ class SparkConnectPlannerSuite extends SparkFunSuite with SparkConnectPlanTest {
 
     val res = transform(
       proto.Relation.newBuilder
-        .setUnion(
-          proto.Union.newBuilder
-            .addAllInputs(Seq(readRel, readRel).asJava)
-            .setUnionType(proto.Union.UnionType.UNION_TYPE_ALL)
+        .setSetOp(
+          proto.SetOperation.newBuilder
+            .setLeftInput(readRel)
+            .setRightInput(readRel)
+            .setSetOpType(proto.SetOperation.SetOpType.SET_OP_TYPE_UNION)
+            .setIsAll(true)
             .build())
         .build())
     assert(res.nodeName == "Union")
@@ -302,5 +303,29 @@ class SparkConnectPlannerSuite extends SparkFunSuite with SparkConnectPlanTest {
       transform(proto.Relation.newBuilder.setDeduplicate(deduplicate2).build())
     }
     assert(e2.getMessage.contains("either deduplicate on all columns or a subset of columns"))
+  }
+
+  test("Test invalid intersect, except") {
+    // Except with union_by_name=true
+    val except = proto.SetOperation
+      .newBuilder()
+      .setLeftInput(readRel)
+      .setRightInput(readRel)
+      .setByName(true)
+      .setSetOpType(proto.SetOperation.SetOpType.SET_OP_TYPE_EXCEPT)
+    val e =
+      intercept[InvalidPlanInput](transform(proto.Relation.newBuilder.setSetOp(except).build()))
+    assert(e.getMessage.contains("Except does not support union_by_name"))
+
+    // Intersect with union_by_name=true
+    val intersect = proto.SetOperation
+      .newBuilder()
+      .setLeftInput(readRel)
+      .setRightInput(readRel)
+      .setByName(true)
+      .setSetOpType(proto.SetOperation.SetOpType.SET_OP_TYPE_INTERSECT)
+    val e2 = intercept[InvalidPlanInput](
+      transform(proto.Relation.newBuilder.setSetOp(intersect).build()))
+    assert(e2.getMessage.contains("Intersect does not support union_by_name"))
   }
 }
