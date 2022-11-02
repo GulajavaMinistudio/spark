@@ -180,9 +180,9 @@ package object dsl {
   object plans { // scalastyle:ignore
     implicit class DslMockRemoteSession(val session: MockRemoteSession) {
       def range(
-          start: Option[Int],
-          end: Int,
-          step: Option[Int],
+          start: Option[Long],
+          end: Long,
+          step: Option[Long],
           numPartitions: Option[Int]): Relation = {
         val range = proto.Range.newBuilder()
         if (start.isDefined) {
@@ -197,6 +197,10 @@ package object dsl {
             proto.Range.NumPartitions.newBuilder().setNumPartitions(numPartitions.get))
         }
         Relation.newBuilder().setRange(range).build()
+      }
+
+      def sql(sqlText: String): Relation = {
+        Relation.newBuilder().setSql(SQL.newBuilder().setQuery(sqlText)).build()
       }
     }
 
@@ -308,7 +312,7 @@ package object dsl {
       def as(alias: String): Relation = {
         Relation
           .newBuilder(logicalPlan)
-          .setCommon(RelationCommon.newBuilder().setAlias(alias))
+          .setSubqueryAlias(SubqueryAlias.newBuilder().setAlias(alias).setInput(logicalPlan))
           .build()
       }
 
@@ -327,6 +331,45 @@ package object dsl {
               .setLowerBound(lowerBound)
               .setWithReplacement(withReplacement)
               .setSeed(Sample.Seed.newBuilder().setSeed(seed).build())
+              .build())
+          .build()
+      }
+
+      def createDefaultSortField(col: String): Sort.SortField = {
+        Sort.SortField
+          .newBuilder()
+          .setNulls(Sort.SortNulls.SORT_NULLS_FIRST)
+          .setDirection(Sort.SortDirection.SORT_DIRECTION_ASCENDING)
+          .setExpression(
+            Expression.newBuilder
+              .setUnresolvedAttribute(
+                Expression.UnresolvedAttribute.newBuilder.setUnparsedIdentifier(col).build())
+              .build())
+          .build()
+      }
+
+      def sort(columns: String*): Relation = {
+        Relation
+          .newBuilder()
+          .setSort(
+            Sort
+              .newBuilder()
+              .setInput(logicalPlan)
+              .addAllSortFields(columns.map(createDefaultSortField).asJava)
+              .setIsGlobal(true)
+              .build())
+          .build()
+      }
+
+      def sortWithinPartitions(columns: String*): Relation = {
+        Relation
+          .newBuilder()
+          .setSort(
+            Sort
+              .newBuilder()
+              .setInput(logicalPlan)
+              .addAllSortFields(columns.map(createDefaultSortField).asJava)
+              .setIsGlobal(false)
               .build())
           .build()
       }
