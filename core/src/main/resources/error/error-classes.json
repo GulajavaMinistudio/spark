@@ -138,6 +138,11 @@
           "Unable to convert column <name> of type <type> to JSON."
         ]
       },
+      "CANNOT_DROP_ALL_FIELDS" : {
+        "message" : [
+          "Cannot drop all fields in struct."
+        ]
+      },
       "CAST_WITHOUT_SUGGESTION" : {
         "message" : [
           "cannot cast <srcType> to <targetType>."
@@ -153,6 +158,21 @@
         "message" : [
           "cannot cast <srcType> to <targetType>.",
           "To convert values from <srcType> to <targetType>, you can use the functions <functionNames> instead."
+        ]
+      },
+      "CREATE_MAP_KEY_DIFF_TYPES" : {
+        "message" : [
+          "The given keys of function <functionName> should all be the same type, but they are <dataType>."
+        ]
+      },
+      "CREATE_MAP_VALUE_DIFF_TYPES" : {
+        "message" : [
+          "The given values of function <functionName> should all be the same type, but they are <dataType>."
+        ]
+      },
+      "CREATE_NAMED_STRUCT_WITHOUT_FOLDABLE_STRING" : {
+        "message" : [
+          "Only foldable `STRING` expressions are allowed to appear at odd position, but they are <inputExprs>."
         ]
       },
       "DATA_DIFF_TYPES" : {
@@ -548,6 +568,11 @@
       "The fraction of sec must be zero. Valid range is [0, 60]. If necessary set <ansiConfig> to \"false\" to bypass this error."
     ],
     "sqlState" : "22023"
+  },
+  "INVALID_IDENTIFIER" : {
+    "message" : [
+      "The identifier <ident> is invalid. Please, consider quoting it with back-quotes as `<ident>`."
+    ]
   },
   "INVALID_JSON_SCHEMA_MAP_TYPE" : {
     "message" : [
@@ -1354,11 +1379,6 @@
   "_LEGACY_ERROR_TEMP_0039" : {
     "message" : [
       "Unsupported SQL statement."
-    ]
-  },
-  "_LEGACY_ERROR_TEMP_0040" : {
-    "message" : [
-      "Possibly unquoted identifier <ident> detected. Please consider quoting it with back-quotes as `<ident>`."
     ]
   },
   "_LEGACY_ERROR_TEMP_0041" : {
