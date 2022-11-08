@@ -27,6 +27,7 @@ import org.apache.spark.sql.catalyst.plans.logical.LogicalPlan
 import org.apache.spark.sql.connect.dsl.MockRemoteSession
 import org.apache.spark.sql.connect.dsl.expressions._
 import org.apache.spark.sql.connect.dsl.plans._
+import org.apache.spark.sql.functions._
 import org.apache.spark.sql.internal.SQLConf
 import org.apache.spark.sql.types.{IntegerType, StringType, StructField, StructType}
 
@@ -144,6 +145,22 @@ class SparkConnectProtoSuite extends PlanTest with SparkConnectPlanTest {
     }
   }
 
+  test("Aggregate expressions") {
+    withSQLConf(SQLConf.DATAFRAME_RETAIN_GROUP_COLUMNS.key -> "false") {
+      val connectPlan =
+        connectTestRelation.groupBy("id".protoAttr)(proto_min("name".protoAttr))
+      val sparkPlan =
+        sparkTestRelation.groupBy(Column("id")).agg(min(Column("name")))
+      comparePlans(connectPlan, sparkPlan)
+
+      val connectPlan2 =
+        connectTestRelation.groupBy("id".protoAttr)(proto_min("name".protoAttr).as("agg1"))
+      val sparkPlan2 =
+        sparkTestRelation.groupBy(Column("id")).agg(min(Column("name")).as("agg1"))
+      comparePlans(connectPlan2, sparkPlan2)
+    }
+  }
+
   test("Test as(alias: String)") {
     val connectPlan = connectTestRelation.as("target_table")
     val sparkPlan = sparkTestRelation.as("target_table")
@@ -232,6 +249,16 @@ class SparkConnectProtoSuite extends PlanTest with SparkConnectPlanTest {
 
   test("Test Session.sql") {
     comparePlans(connect.sql("SELECT 1"), spark.sql("SELECT 1"))
+  }
+
+  test("Test Repartition") {
+    val connectPlan1 = connectTestRelation.repartition(12)
+    val sparkPlan1 = sparkTestRelation.repartition(12)
+    comparePlans(connectPlan1, sparkPlan1)
+
+    val connectPlan2 = connectTestRelation.coalesce(2)
+    val sparkPlan2 = sparkTestRelation.coalesce(2)
+    comparePlans(connectPlan2, sparkPlan2)
   }
 
   private def createLocalRelationProtoByQualifiedAttributes(

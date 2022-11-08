@@ -25,7 +25,7 @@ import org.apache.spark.sql.SparkSession
 import org.apache.spark.sql.catalyst.AliasIdentifier
 import org.apache.spark.sql.catalyst.analysis.{UnresolvedAlias, UnresolvedAttribute, UnresolvedFunction, UnresolvedRelation, UnresolvedStar}
 import org.apache.spark.sql.catalyst.expressions
-import org.apache.spark.sql.catalyst.expressions.{Alias, Attribute, AttributeReference, Expression}
+import org.apache.spark.sql.catalyst.expressions.{Alias, Attribute, AttributeReference, Expression, NamedExpression}
 import org.apache.spark.sql.catalyst.optimizer.CombineUnions
 import org.apache.spark.sql.catalyst.parser.CatalystSqlParser
 import org.apache.spark.sql.catalyst.plans.{logical, FullOuter, Inner, JoinType, LeftAnti, LeftOuter, LeftSemi, RightOuter, UsingJoin}
@@ -72,6 +72,7 @@ class SparkConnectPlanner(plan: proto.Relation, session: SparkSession) {
       case proto.Relation.RelTypeCase.RANGE => transformRange(rel.getRange)
       case proto.Relation.RelTypeCase.SUBQUERY_ALIAS =>
         transformSubqueryAlias(rel.getSubqueryAlias)
+      case proto.Relation.RelTypeCase.REPARTITION => transformRepartition(rel.getRepartition)
       case proto.Relation.RelTypeCase.RELTYPE_NOT_SET =>
         throw new IndexOutOfBoundsException("Expected Relation to be set, but is empty.")
       case _ => throw InvalidPlanInput(s"${rel.getUnknown} not supported.")
@@ -105,6 +106,10 @@ class SparkConnectPlanner(plan: proto.Relation, session: SparkSession) {
       rel.getWithReplacement,
       if (rel.hasSeed) rel.getSeed.getSeed else Utils.random.nextLong,
       transformRelation(rel.getInput))
+  }
+
+  private def transformRepartition(rel: proto.Repartition): LogicalPlan = {
+    logical.Repartition(rel.getNumPartitions, rel.getShuffle, transformRelation(rel.getInput))
   }
 
   private def transformRange(rel: proto.Range): LogicalPlan = {
@@ -285,7 +290,7 @@ class SparkConnectPlanner(plan: proto.Relation, session: SparkSession) {
       isDistinct = false)
   }
 
-  private def transformAlias(alias: proto.Expression.Alias): Expression = {
+  private def transformAlias(alias: proto.Expression.Alias): NamedExpression = {
     Alias(transformExpression(alias.getExpr), alias.getName)()
   }
 
@@ -393,17 +398,15 @@ class SparkConnectPlanner(plan: proto.Relation, session: SparkSession) {
       child = transformRelation(rel.getInput),
       groupingExpressions = groupingExprs.toSeq,
       aggregateExpressions =
-        rel.getResultExpressionsList.asScala.map(transformAggregateExpression).toSeq)
+        rel.getResultExpressionsList.asScala.map(transformResultExpression).toSeq)
   }
 
-  private def transformAggregateExpression(
-      exp: proto.Aggregate.AggregateFunction): expressions.NamedExpression = {
-    val fun = exp.getName
-    UnresolvedAlias(
-      UnresolvedFunction(
-        name = fun,
-        arguments = exp.getArgumentsList.asScala.map(transformExpression).toSeq,
-        isDistinct = false))
+  private def transformResultExpression(exp: proto.Expression): expressions.NamedExpression = {
+    if (exp.hasAlias) {
+      transformAlias(exp.getAlias)
+    } else {
+      UnresolvedAlias(transformExpression(exp))
+    }
   }
 
 }
