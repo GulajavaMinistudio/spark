@@ -216,14 +216,28 @@ package object dsl {
           range.setStep(1L)
         }
         if (numPartitions.isDefined) {
-          range.setNumPartitions(
-            proto.Range.NumPartitions.newBuilder().setNumPartitions(numPartitions.get))
+          range.setNumPartitions(numPartitions.get)
         }
         Relation.newBuilder().setRange(range).build()
       }
 
       def sql(sqlText: String): Relation = {
         Relation.newBuilder().setSql(SQL.newBuilder().setQuery(sqlText)).build()
+      }
+    }
+
+    implicit class DslStatFunctions(val logicalPlan: Relation) {
+      def crosstab(col1: String, col2: String): Relation = {
+        Relation
+          .newBuilder()
+          .setCrosstab(
+            proto.StatCrosstab
+              .newBuilder()
+              .setInput(logicalPlan)
+              .setCol1(col1)
+              .setCol2(col2)
+              .build())
+          .build()
       }
     }
 
@@ -361,7 +375,7 @@ package object dsl {
               .setUpperBound(upperBound)
               .setLowerBound(lowerBound)
               .setWithReplacement(withReplacement)
-              .setSeed(Sample.Seed.newBuilder().setSeed(seed).build())
+              .setSeed(seed)
               .build())
           .build()
       }
@@ -463,18 +477,16 @@ package object dsl {
             Repartition.newBuilder().setInput(logicalPlan).setNumPartitions(num).setShuffle(true))
           .build()
 
+      def stat: DslStatFunctions = new DslStatFunctions(logicalPlan)
+
       def summary(statistics: String*): Relation = {
         Relation
           .newBuilder()
-          .setStatFunction(
-            proto.StatFunction
+          .setSummary(
+            proto.StatSummary
               .newBuilder()
               .setInput(logicalPlan)
-              .setSummary(
-                proto.StatFunction.Summary
-                  .newBuilder()
-                  .addAllStatistics(statistics.toSeq.asJava)
-                  .build())
+              .addAllStatistics(statistics.toSeq.asJava)
               .build())
           .build()
       }

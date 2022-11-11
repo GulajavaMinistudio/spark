@@ -50,7 +50,9 @@ message Relation {
     RenameColumnsBySameLengthNames rename_columns_by_same_length_names = 18;
     RenameColumnsByNameToNameMap rename_columns_by_name_to_name_map = 19;
 
-    StatFunction stat_function = 100;
+    // stat functions
+    StatSummary summary = 100;
+    StatCrosstab crosstab = 101;
 
     Unknown unknown = 999;
   }
@@ -213,11 +215,7 @@ message Sample {
   double lower_bound = 2;
   double upper_bound = 3;
   bool with_replacement = 4;
-  Seed seed = 5;
-
-  message Seed {
-    int64 seed = 1;
-  }
+  optional int64 seed = 5;
 }
 
 // Relation of type [[Range]] that generates a sequence of integers.
@@ -230,11 +228,7 @@ message Range {
   int64 step = 3;
   // Optional. Default value is assigned by 1) SQL conf "spark.sql.leafNodeDefaultParallelism" if
   // it is set, or 2) spark default parallelism.
-  NumPartitions num_partitions = 4;
-
-  message NumPartitions {
-    int32 num_partitions = 1;
-  }
+  optional int32 num_partitions = 4;
 }
 
 // Relation alias.
@@ -259,21 +253,46 @@ message Repartition {
   bool shuffle = 3;
 }
 
-// StatFunction
-message StatFunction {
-  // Required. The input relation.
+// Computes specified statistics for numeric and string columns.
+// It will invoke 'Dataset.summary' (same as 'StatFunctions.summary')
+// to compute the results.
+message StatSummary {
+  // (Required) The input relation.
   Relation input = 1;
-  // Required. The function and its parameters.
-  oneof function {
-    Summary summary = 2;
 
-    Unknown unknown = 999;
-  }
+  // (Optional) Statistics from to be computed.
+  //
+  // Available statistics are:
+  //  count
+  //  mean
+  //  stddev
+  //  min
+  //  max
+  //  arbitrary approximate percentiles specified as a percentage (e.g. 75%)
+  //  count_distinct
+  //  approx_count_distinct
+  //
+  // If no statistics are given, this function computes 'count', 'mean', 'stddev', 'min',
+  // 'approximate quartiles' (percentiles at 25%, 50%, and 75%), and 'max'.
+  repeated string statistics = 2;
+}
 
-  // StatFunctions.summary
-  message Summary {
-    repeated string statistics = 1;
-  }
+// Computes a pair-wise frequency table of the given columns. Also known as a contingency table.
+// It will invoke 'Dataset.stat.crosstab' (same as 'StatFunctions.crossTabulate')
+// to compute the results.
+message StatCrosstab {
+  // (Required) The input relation.
+  Relation input = 1;
+
+  // (Required) The name of the first column.
+  //
+  // Distinct items will make the first item of each row.
+  string col1 = 2;
+
+  // (Required) The name of the second column.
+  //
+  // Distinct items will make the column names of the DataFrame.
+  string col2 = 3;
 }
 
 // Rename columns on the input relation by the same length of names.

@@ -73,7 +73,7 @@ class SparkConnectTestsPlanOnly(PlanOnlyTestFixture):
     def test_summary(self):
         df = self.connect.readTable(table_name=self.tbl_name)
         plan = df.filter(df.col_name > 3).summary()._plan.to_proto(self.connect)
-        self.assertEqual(plan.root.stat_function.summary.statistics, [])
+        self.assertEqual(plan.root.summary.statistics, [])
 
         plan = (
             df.filter(df.col_name > 3)
@@ -81,9 +81,19 @@ class SparkConnectTestsPlanOnly(PlanOnlyTestFixture):
             ._plan.to_proto(self.connect)
         )
         self.assertEqual(
-            plan.root.stat_function.summary.statistics,
+            plan.root.summary.statistics,
             ["count", "mean", "stddev", "min", "25%"],
         )
+
+    def test_crosstab(self):
+        df = self.connect.readTable(table_name=self.tbl_name)
+        plan = df.filter(df.col_name > 3).crosstab("col_a", "col_b")._plan.to_proto(self.connect)
+        self.assertEqual(plan.root.crosstab.col1, "col_a")
+        self.assertEqual(plan.root.crosstab.col2, "col_b")
+
+        plan = df.stat.crosstab("col_a", "col_b")._plan.to_proto(self.connect)
+        self.assertEqual(plan.root.crosstab.col1, "col_a")
+        self.assertEqual(plan.root.crosstab.col2, "col_b")
 
     def test_limit(self):
         df = self.connect.readTable(table_name=self.tbl_name)
@@ -111,7 +121,7 @@ class SparkConnectTestsPlanOnly(PlanOnlyTestFixture):
         self.assertEqual(plan.root.sample.lower_bound, 0.0)
         self.assertEqual(plan.root.sample.upper_bound, 0.4)
         self.assertEqual(plan.root.sample.with_replacement, True)
-        self.assertEqual(plan.root.sample.seed.seed, -1)
+        self.assertEqual(plan.root.sample.seed, -1)
 
     def test_sort(self):
         df = self.connect.readTable(table_name=self.tbl_name)
@@ -170,7 +180,7 @@ class SparkConnectTestsPlanOnly(PlanOnlyTestFixture):
         self.assertEqual(plan.root.range.start, 10)
         self.assertEqual(plan.root.range.end, 20)
         self.assertEqual(plan.root.range.step, 3)
-        self.assertEqual(plan.root.range.num_partitions.num_partitions, 4)
+        self.assertEqual(plan.root.range.num_partitions, 4)
 
         plan = self.connect.range(start=10, end=20)._plan.to_proto(self.connect)
         self.assertEqual(plan.root.range.start, 10)
