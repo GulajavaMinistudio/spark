@@ -126,19 +126,23 @@ class SparkConnectStreamHandler(responseObserver: StreamObserver[Response]) exte
   def processAsArrowBatches(clientId: String, dataframe: DataFrame): Unit = {
     val spark = dataframe.sparkSession
     val schema = dataframe.schema
+    val maxRecordsPerBatch = spark.sessionState.conf.arrowMaxRecordsPerBatch
     val timeZoneId = spark.sessionState.conf.sessionLocalTimeZone
 
     SQLExecution.withNewExecutionId(dataframe.queryExecution, Some("collectArrow")) {
       val rows = dataframe.queryExecution.executedPlan.execute()
       val numPartitions = rows.getNumPartitions
+      // Conservatively sets it 70% because the size is not accurate but estimated.
+      val maxBatchSize = (MAX_BATCH_SIZE * 0.7).toLong
       var numSent = 0
 
       if (numPartitions > 0) {
         type Batch = (Array[Byte], Long)
 
         val batches = rows.mapPartitionsInternal { iter =>
-          ArrowConverters
-            .toBatchWithSchemaIterator(iter, schema, MAX_BATCH_SIZE, timeZoneId)
+          val newIter = ArrowConverters
+            .toBatchWithSchemaIterator(iter, schema, maxRecordsPerBatch, maxBatchSize, timeZoneId)
+          newIter.map { batch: Array[Byte] => (batch, newIter.rowCountInLastBatch) }
         }
 
         val signal = new Object
@@ -157,17 +161,24 @@ class SparkConnectStreamHandler(responseObserver: StreamObserver[Response]) exte
           ()
         }
 
-        spark.sparkContext.runJob(batches, processPartition, resultHandler)
+        spark.sparkContext.submitJob(
+          rdd = batches,
+          processPartition = processPartition,
+          partitions = Seq.range(0, numPartitions),
+          resultHandler = resultHandler,
+          resultFunc = () => ())
 
         // The man thread will wait until 0-th partition is available,
-        // then send it to client and wait for next partition.
+        // then send it to client and wait for the next partition.
         var currentPartitionId = 0
         while (currentPartitionId < numPartitions) {
           val partition = signal.synchronized {
-            while (!partitions.contains(currentPartitionId)) {
+            var result = partitions.remove(currentPartitionId)
+            while (result.isEmpty) {
               signal.wait()
+              result = partitions.remove(currentPartitionId)
             }
-            partitions.remove(currentPartitionId).get
+            result.get
           }
 
           partition.foreach { case (bytes, count) =>
