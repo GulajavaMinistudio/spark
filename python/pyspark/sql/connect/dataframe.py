@@ -414,6 +414,30 @@ class DataFrame(object):
     def offset(self, n: int) -> "DataFrame":
         return DataFrame.withPlan(plan.Offset(child=self._plan, offset=n), session=self._session)
 
+    def tail(self, num: int) -> List[Row]:
+        """
+        Returns the last ``num`` rows as a :class:`list` of :class:`Row`.
+
+        Running tail requires moving data into the application's driver process, and doing so with
+        a very large ``num`` can crash the driver process with OutOfMemoryError.
+
+        .. versionadded:: 3.4.0
+
+        Parameters
+        ----------
+        num : int
+            Number of records to return. Will return this number of records
+            or whataver number is available.
+
+        Returns
+        -------
+        list
+            List of rows
+        """
+        return DataFrame.withPlan(
+            plan.Tail(child=self._plan, limit=num), session=self._session
+        ).collect()
+
     def sort(self, *cols: "ColumnOrName") -> "DataFrame":
         """Sort by a specific column"""
         return DataFrame.withPlan(
@@ -1108,6 +1132,15 @@ class DataFrame(object):
 
     def toJSON(self, *args: Any, **kwargs: Any) -> None:
         raise NotImplementedError("toJSON() is not implemented.")
+
+    def _repr_html_(self, *args: Any, **kwargs: Any) -> None:
+        raise NotImplementedError("_repr_html_() is not implemented.")
+
+    def semanticHash(self, *args: Any, **kwargs: Any) -> None:
+        raise NotImplementedError("semanticHash() is not implemented.")
+
+    def sameSemantics(self, *args: Any, **kwargs: Any) -> None:
+        raise NotImplementedError("sameSemantics() is not implemented.")
 
 
 class DataFrameNaFunctions:
