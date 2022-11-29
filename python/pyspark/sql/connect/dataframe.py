@@ -309,6 +309,21 @@ class DataFrame(object):
         )
 
     def drop(self, *cols: "ColumnOrName") -> "DataFrame":
+        """Returns a new :class:`DataFrame` without specified columns.
+        This is a no-op if schema doesn't contain the given column name(s).
+
+        .. versionadded:: 3.4.0
+
+        Parameters
+        ----------
+        cols: str or :class:`Column`
+            a name of the column, or the :class:`Column` to drop
+
+        Returns
+        -------
+        :class:`DataFrame`
+            DataFrame without given columns.
+        """
         _cols = list(cols)
         if any(not isinstance(c, (str, Column)) for c in _cols):
             raise TypeError(
@@ -326,6 +341,23 @@ class DataFrame(object):
         )
 
     def filter(self, condition: Expression) -> "DataFrame":
+        """Filters rows using the given condition.
+
+        :func:`where` is an alias for :func:`filter`.
+
+        .. versionadded:: 3.4.0
+
+        Parameters
+        ----------
+        condition : :class:`Column` or str
+            a :class:`Column` of :class:`types.BooleanType`
+            or a string of SQL expression.
+
+        Returns
+        -------
+        :class:`DataFrame`
+            Filtered DataFrame.
+        """
         return DataFrame.withPlan(
             plan.Filter(child=self._plan, filter=condition), session=self._session
         )
@@ -409,9 +441,39 @@ class DataFrame(object):
         )
 
     def limit(self, n: int) -> "DataFrame":
+        """Limits the result count to the number specified.
+
+        .. versionadded:: 3.4.0
+
+        Parameters
+        ----------
+        num : int
+            Number of records to return. Will return this number of records
+            or whatever number is available.
+
+        Returns
+        -------
+        :class:`DataFrame`
+            Subset of the records
+        """
         return DataFrame.withPlan(plan.Limit(child=self._plan, limit=n), session=self._session)
 
     def offset(self, n: int) -> "DataFrame":
+        """Returns a new :class: `DataFrame` by skipping the first `n` rows.
+
+        .. versionadded:: 3.4.0
+
+        Parameters
+        ----------
+        num : int
+            Number of records to return. Will return this number of records
+            or all records if the DataFrame contains less than this number of records.
+
+        Returns
+        -------
+        :class:`DataFrame`
+            Subset of the records
+        """
         return DataFrame.withPlan(plan.Offset(child=self._plan, offset=n), session=self._session)
 
     def tail(self, num: int) -> List[Row]:
@@ -427,7 +489,7 @@ class DataFrame(object):
         ----------
         num : int
             Number of records to return. Will return this number of records
-            or whataver number is available.
+            or all records if the DataFrame contains less than this number of records.
 
         Returns
         -------
@@ -457,6 +519,31 @@ class DataFrame(object):
         withReplacement: bool = False,
         seed: Optional[int] = None,
     ) -> "DataFrame":
+        """Returns a sampled subset of this :class:`DataFrame`.
+
+        .. versionadded:: 3.4.0
+
+        Parameters
+        ----------
+        withReplacement : bool, optional
+            Sample with replacement or not (default ``False``).
+        fraction : float
+            Fraction of rows to generate, range [0.0, 1.0].
+        seed : int, optional
+            Seed for sampling (default a random seed).
+
+        Returns
+        -------
+        :class:`DataFrame`
+            Sampled rows from given DataFrame.
+
+        Notes
+        -----
+        This is not guaranteed to provide exactly the fraction specified of the total
+        count of the given :class:`DataFrame`.
+
+        `fraction` is required and, `withReplacement` and `seed` are optional.
+        """
         if not isinstance(fraction, float):
             raise TypeError(f"'fraction' must be float, but got {type(fraction).__name__}")
         if not isinstance(withReplacement, bool):
@@ -524,9 +611,62 @@ class DataFrame(object):
         print(self._show_string(n, truncate, vertical))
 
     def union(self, other: "DataFrame") -> "DataFrame":
+        """Return a new :class:`DataFrame` containing union of rows in this and another
+        :class:`DataFrame`.
+
+        .. versionadded:: 3.4.0
+
+        Parameters
+        ----------
+        other : :class:`DataFrame`
+            Another :class:`DataFrame` that needs to be unioned
+
+        Returns
+        -------
+        :class:`DataFrame`
+
+        See Also
+        --------
+        DataFrame.unionAll
+
+        Notes
+        -----
+        This is equivalent to `UNION ALL` in SQL. To do a SQL-style set union
+        (that does deduplication of elements), use this function followed by :func:`distinct`.
+
+        Also as standard in SQL, this function resolves columns by position (not by name).
+        """
         return self.unionAll(other)
 
     def unionAll(self, other: "DataFrame") -> "DataFrame":
+        """Return a new :class:`DataFrame` containing union of rows in this and another
+        :class:`DataFrame`.
+
+        .. versionadded:: 3.4.0
+
+        Parameters
+        ----------
+        other : :class:`DataFrame`
+            Another :class:`DataFrame` that needs to be combined
+
+        Returns
+        -------
+        :class:`DataFrame`
+            Combined DataFrame
+
+        Notes
+        -----
+        This is equivalent to `UNION ALL` in SQL. To do a SQL-style set union
+        (that does deduplication of elements), use this function followed by :func:`distinct`.
+
+        Also as standard in SQL, this function resolves columns by position (not by name).
+
+        :func:`unionAll` is an alias to :func:`union`
+
+        See Also
+        --------
+        DataFrame.union
+        """
         if other._plan is None:
             raise ValueError("Argument to Union does not contain a valid plan.")
         return DataFrame.withPlan(
@@ -975,29 +1115,9 @@ class DataFrame(object):
         ), "Func returned an instance of type [%s], " "should have been DataFrame." % type(result)
         return result
 
-    def explain(
+    def _explain_string(
         self, extended: Optional[Union[bool, str]] = None, mode: Optional[str] = None
     ) -> str:
-        """Retruns plans in string for debugging purpose.
-
-        .. versionadded:: 3.4.0
-
-        Parameters
-        ----------
-        extended : bool, optional
-            default ``False``. If ``False``, returns only the physical plan.
-            When this is a string without specifying the ``mode``, it works as the mode is
-            specified.
-        mode : str, optional
-            specifies the expected output format of plans.
-
-            * ``simple``: Print only a physical plan.
-            * ``extended``: Print both logical and physical plans.
-            * ``codegen``: Print a physical plan and generated codes if they are available.
-            * ``cost``: Print a logical plan and statistics if they are available.
-            * ``formatted``: Split explain output into two sections: a physical plan outline \
-                and node details.
-        """
         if extended is not None and mode is not None:
             raise ValueError("extended and mode should not be set together.")
 
@@ -1041,6 +1161,31 @@ class DataFrame(object):
             return self._session.client.explain_string(query, explain_mode)
         else:
             return ""
+
+    def explain(
+        self, extended: Optional[Union[bool, str]] = None, mode: Optional[str] = None
+    ) -> None:
+        """Retruns plans in string for debugging purpose.
+
+        .. versionadded:: 3.4.0
+
+        Parameters
+        ----------
+        extended : bool, optional
+            default ``False``. If ``False``, returns only the physical plan.
+            When this is a string without specifying the ``mode``, it works as the mode is
+            specified.
+        mode : str, optional
+            specifies the expected output format of plans.
+
+            * ``simple``: Print only a physical plan.
+            * ``extended``: Print both logical and physical plans.
+            * ``codegen``: Print a physical plan and generated codes if they are available.
+            * ``cost``: Print a logical plan and statistics if they are available.
+            * ``formatted``: Split explain output into two sections: a physical plan outline \
+                and node details.
+        """
+        print(self._explain_string(extended=extended, mode=mode))
 
     def createGlobalTempView(self, name: str) -> None:
         """Creates a global temporary view with this :class:`DataFrame`.
