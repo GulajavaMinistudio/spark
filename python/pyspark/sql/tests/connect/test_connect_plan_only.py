@@ -17,11 +17,13 @@
 from typing import cast
 import unittest
 
+from pyspark.sql.connect.plan import WriteOperation
 from pyspark.testing.connectutils import PlanOnlyTestFixture
 from pyspark.testing.sqlutils import have_pandas, pandas_requirement_message
 
 if have_pandas:
     import pyspark.sql.connect.proto as proto
+    from pyspark.sql.connect.column import Column
     from pyspark.sql.connect.readwriter import DataFrameReader
     from pyspark.sql.connect.function_builder import UserDefinedFunction, udf
     from pyspark.sql.types import StringType
@@ -70,13 +72,21 @@ class SparkConnectTestsPlanOnly(PlanOnlyTestFixture):
         self.assertEqual(plan.root.filter.condition.unresolved_function.parts, [">"])
         self.assertEqual(len(plan.root.filter.condition.unresolved_function.arguments), 2)
 
+    def test_filter_with_string_expr(self):
+        """SPARK-41297: filter supports SQL expression"""
+        df = self.connect.readTable(table_name=self.tbl_name)
+        plan = df.filter("id < 10")._plan.to_proto(self.connect)
+        self.assertIsNotNone(plan.root.filter)
+        self.assertIsNotNone(plan.root.filter.condition.expression_string)
+        self.assertEqual(plan.root.filter.condition.expression_string.expression, "id < 10")
+
     def test_fill_na(self):
         # SPARK-41128: Test fill na
         df = self.connect.readTable(table_name=self.tbl_name)
 
         plan = df.fillna(value=1)._plan.to_proto(self.connect)
         self.assertEqual(len(plan.root.fill_na.values), 1)
-        self.assertEqual(plan.root.fill_na.values[0].i64, 1)
+        self.assertEqual(plan.root.fill_na.values[0].long, 1)
         self.assertEqual(plan.root.fill_na.cols, [])
 
         plan = df.na.fill(value="xyz")._plan.to_proto(self.connect)
@@ -98,9 +108,25 @@ class SparkConnectTestsPlanOnly(PlanOnlyTestFixture):
 
         plan = df.fillna({"col_a": 1.5, "col_b": "abc"})._plan.to_proto(self.connect)
         self.assertEqual(len(plan.root.fill_na.values), 2)
-        self.assertEqual(plan.root.fill_na.values[0].fp64, 1.5)
+        self.assertEqual(plan.root.fill_na.values[0].double, 1.5)
         self.assertEqual(plan.root.fill_na.values[1].string, "abc")
         self.assertEqual(plan.root.fill_na.cols, ["col_a", "col_b"])
+
+    def test_drop_na(self):
+        # SPARK-41148: Test drop na
+        df = self.connect.readTable(table_name=self.tbl_name)
+
+        plan = df.dropna()._plan.to_proto(self.connect)
+        self.assertEqual(plan.root.drop_na.cols, [])
+        self.assertEqual(plan.root.drop_na.HasField("min_non_nulls"), False)
+
+        plan = df.na.drop(thresh=2, subset=("col_a", "col_b"))._plan.to_proto(self.connect)
+        self.assertEqual(plan.root.drop_na.cols, ["col_a", "col_b"])
+        self.assertEqual(plan.root.drop_na.min_non_nulls, 2)
+
+        plan = df.dropna(how="all", subset="col_c")._plan.to_proto(self.connect)
+        self.assertEqual(plan.root.drop_na.cols, ["col_c"])
+        self.assertEqual(plan.root.drop_na.min_non_nulls, 1)
 
     def test_summary(self):
         df = self.connect.readTable(table_name=self.tbl_name)
@@ -167,6 +193,16 @@ class SparkConnectTestsPlanOnly(PlanOnlyTestFixture):
         )
         self.assertEqual(plan.root.sort.is_global, True)
 
+        plan = df.filter(df.col_name > 3).orderBy("col_a", "col_b")._plan.to_proto(self.connect)
+        self.assertEqual(
+            [
+                f.expression.unresolved_attribute.unparsed_identifier
+                for f in plan.root.sort.sort_fields
+            ],
+            ["col_a", "col_b"],
+        )
+        self.assertEqual(plan.root.sort.is_global, True)
+
         plan = (
             df.filter(df.col_name > 3)
             .sortWithinPartitions("col_a", "col_b")
@@ -201,10 +237,16 @@ class SparkConnectTestsPlanOnly(PlanOnlyTestFixture):
         df = self.connect.readTable(table_name=self.tbl_name)
 
         distinct_plan = df.distinct()._plan.to_proto(self.connect)
+        self.assertTrue(distinct_plan.root.deduplicate.HasField("input"), "input must be set")
+
         self.assertEqual(distinct_plan.root.deduplicate.all_columns_as_keys, True)
         self.assertEqual(len(distinct_plan.root.deduplicate.column_names), 0)
 
         deduplicate_on_all_columns_plan = df.dropDuplicates()._plan.to_proto(self.connect)
+        self.assertEqual(deduplicate_on_all_columns_plan.root.deduplicate.all_columns_as_keys, True)
+        self.assertEqual(len(deduplicate_on_all_columns_plan.root.deduplicate.column_names), 0)
+
+        deduplicate_on_all_columns_plan = df.drop_duplicates()._plan.to_proto(self.connect)
         self.assertEqual(deduplicate_on_all_columns_plan.root.deduplicate.all_columns_as_keys, True)
         self.assertEqual(len(deduplicate_on_all_columns_plan.root.deduplicate.column_names), 0)
 
@@ -253,7 +295,8 @@ class SparkConnectTestsPlanOnly(PlanOnlyTestFixture):
         u = udf(lambda x: "Martin", StringType())
         self.assertIsNotNone(u)
         expr = u("ThisCol", "ThatCol", "OtherCol")
-        self.assertTrue(isinstance(expr, UserDefinedFunction))
+        self.assertTrue(isinstance(expr, Column))
+        self.assertTrue(isinstance(cast(Column, expr)._expr, UserDefinedFunction))
         u_plan = expr.to_plan(self.connect)
         self.assertIsNotNone(u_plan)
 
@@ -334,6 +377,40 @@ class SparkConnectTestsPlanOnly(PlanOnlyTestFixture):
         ):
             with self.assertRaises(NotImplementedError):
                 getattr(df, f)()
+
+    def test_write_operation(self):
+        wo = WriteOperation(self.connect.readTable("name")._plan)
+        wo.mode = "overwrite"
+        wo.source = "parquet"
+
+        # Missing path or table name.
+        with self.assertRaises(AssertionError):
+            wo.command(None)
+
+        wo.path = "path"
+        p = wo.command(None)
+        self.assertIsNotNone(p)
+        self.assertTrue(p.write_operation.HasField("path"))
+        self.assertFalse(p.write_operation.HasField("table_name"))
+
+        wo.path = None
+        wo.table_name = "table"
+        p = wo.command(None)
+        self.assertFalse(p.write_operation.HasField("path"))
+        self.assertTrue(p.write_operation.HasField("table_name"))
+
+        wo.bucket_cols = ["a", "b", "c"]
+        p = wo.command(None)
+        self.assertFalse(p.write_operation.HasField("bucket_by"))
+
+        wo.num_buckets = 10
+        p = wo.command(None)
+        self.assertTrue(p.write_operation.HasField("bucket_by"))
+
+        # Unsupported save mode
+        wo.mode = "unknown"
+        with self.assertRaises(ValueError):
+            wo.command(None)
 
 
 if __name__ == "__main__":
