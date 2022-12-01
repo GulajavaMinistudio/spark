@@ -91,10 +91,6 @@ class SparkConnectProtoSuite extends PlanTest with SparkConnectPlanTest {
   }
 
   test("UnresolvedFunction resolution.") {
-    assertThrows[IllegalArgumentException] {
-      transform(connectTestRelation.select(callFunction("default.hex", Seq("id".protoAttr))))
-    }
-
     val connectPlan =
       connectTestRelation.select(callFunction(Seq("default", "hex"), Seq("id".protoAttr)))
 
@@ -359,6 +355,18 @@ class SparkConnectProtoSuite extends PlanTest with SparkConnectPlanTest {
     comparePlans(
       connectTestRelation.na.drop(minNonNulls = Some(1), cols = Seq("id", "name")),
       sparkTestRelation.na.drop(minNonNulls = 1, cols = Seq("id", "name")))
+  }
+
+  test("SPARK-41315: Test replace") {
+    comparePlans(
+      connectTestRelation.na.replace(cols = Seq("id"), replacement = Map(1.0 -> 2.0)),
+      sparkTestRelation.na.replace(cols = Seq("id"), replacement = Map(1.0 -> 2.0)))
+    comparePlans(
+      connectTestRelation.na.replace(cols = Seq("name"), replacement = Map("a" -> "b")),
+      sparkTestRelation.na.replace(cols = Seq("name"), replacement = Map("a" -> "b")))
+    comparePlans(
+      connectTestRelation.na.replace(cols = Seq("*"), replacement = Map("a" -> "b")),
+      sparkTestRelation.na.replace(col = "*", replacement = Map("a" -> "b")))
   }
 
   test("Test summary") {

@@ -15,7 +15,7 @@
 # limitations under the License.
 #
 
-from typing import get_args, TYPE_CHECKING, Callable, Any, Union, overload
+from typing import get_args, TYPE_CHECKING, Callable, Any, Union, overload, cast
 
 import json
 import decimal
@@ -54,6 +54,13 @@ def _bin_op(
             return scalar_function(name, self, other)
         else:
             return scalar_function(name, other, self)
+
+    return _
+
+
+def _unary_op(name: str, doc: str = "unary function") -> Callable[["Column"], "Column"]:
+    def _(self: "Column") -> "Column":
+        return scalar_function(name, self)
 
     return _
 
@@ -269,10 +276,10 @@ class ColumnReference(Expression):
         return expr
 
     def desc(self) -> "SortOrder":
-        return SortOrder(self, ascending=False)
+        return SortOrder(self, ascending=False, nullsLast=True)
 
     def asc(self) -> "SortOrder":
-        return SortOrder(self, ascending=True)
+        return SortOrder(self, ascending=True, nullsLast=False)
 
     def __str__(self) -> str:
         return f"ColumnReference({self._unparsed_identifier})"
@@ -295,9 +302,7 @@ class SQLExpression(Expression):
 
 
 class SortOrder(Expression):
-    def __init__(
-        self, col: ColumnReference, ascending: bool = True, nullsLast: bool = True
-    ) -> None:
+    def __init__(self, col: Expression, ascending: bool = True, nullsLast: bool = False) -> None:
         super().__init__()
         self.ref = col
         self._ascending = ascending
@@ -307,7 +312,21 @@ class SortOrder(Expression):
         return str(self.ref) + " ASC" if self.ascending else " DESC"
 
     def to_plan(self, session: "SparkConnectClient") -> proto.Expression:
-        return self.ref.to_plan(session)
+        # TODO(SPARK-41334): move SortField from relations.proto to expressions.proto
+        sort = proto.Sort.SortField()
+        sort.expression.CopyFrom(self.ref.to_plan(session))
+
+        if self._ascending:
+            sort.direction = proto.Sort.SortDirection.SORT_DIRECTION_ASCENDING
+        else:
+            sort.direction = proto.Sort.SortDirection.SORT_DIRECTION_DESCENDING
+
+        if self._nullsLast:
+            sort.nulls = proto.Sort.SortNulls.SORT_NULLS_LAST
+        else:
+            sort.nulls = proto.Sort.SortNulls.SORT_NULLS_FIRST
+
+        return cast(proto.Expression, sort)
 
     def ascending(self) -> bool:
         return self._ascending
@@ -328,7 +347,7 @@ class ScalarFunctionExpression(Expression):
 
     def to_plan(self, session: "SparkConnectClient") -> proto.Expression:
         fun = proto.Expression()
-        fun.unresolved_function.parts.append(self._op)
+        fun.unresolved_function.function_name = self._op
         fun.unresolved_function.arguments.extend([x.to_plan(session) for x in self._args])
         return fun
 
@@ -489,6 +508,16 @@ class Column(object):
     bitwiseAND = _bin_op("bitwiseAND", _bitwiseAND_doc)
     bitwiseXOR = _bin_op("bitwiseXOR", _bitwiseXOR_doc)
 
+    _isNull_doc = """
+    True if the current expression is null.
+    """
+    _isNotNull_doc = """
+    True if the current expression is NOT null.
+    """
+
+    isNull = _unary_op("isNull", _isNull_doc)
+    isNotNull = _unary_op("isNotNull", _isNotNull_doc)
+
     # string methods
     def contains(self, other: Union[PrimitiveType, "Column"]) -> "Column":
         """
@@ -508,45 +537,24 @@ class Column(object):
         """
         return _bin_op("contains")(self, other)
 
-    def startswith(self, other: Union[PrimitiveType, "Column"]) -> "Column":
-        """
-        String starts with. Returns a boolean :class:`Column` based on a string match.
+    _startswith_doc = """
+    String starts with. Returns a boolean :class:`Column` based on a string match.
 
-        Parameters
-        ----------
-        other : :class:`Column` or str
-            string at start of line (do not use a regex `^`)
+    Parameters
+    ----------
+    other : :class:`Column` or str
+        string at start of line (do not use a regex `^`)
+    """
+    _endswith_doc = """
+    String ends with. Returns a boolean :class:`Column` based on a string match.
 
-        Examples
-        --------
-        >>> df = spark.createDataFrame(
-        ...      [(2, "Alice"), (5, "Bob")], ["age", "name"])
-        >>> df.filter(df.name.startswith('Al')).collect()
-        [Row(age=2, name='Alice')]
-        >>> df.filter(df.name.startswith('^Al')).collect()
-        []
-        """
-        return _bin_op("startsWith")(self, other)
-
-    def endswith(self, other: Union[PrimitiveType, "Column"]) -> "Column":
-        """
-        String ends with. Returns a boolean :class:`Column` based on a string match.
-
-        Parameters
-        ----------
-        other : :class:`Column` or str
-            string at end of line (do not use a regex `$`)
-
-        Examples
-        --------
-        >>> df = spark.createDataFrame(
-        ...      [(2, "Alice"), (5, "Bob")], ["age", "name"])
-        >>> df.filter(df.name.endswith('ice')).collect()
-        [Row(age=2, name='Alice')]
-        >>> df.filter(df.name.endswith('ice$')).collect()
-        []
-        """
-        return _bin_op("endsWith")(self, other)
+    Parameters
+    ----------
+    other : :class:`Column` or str
+        string at end of line (do not use a regex `$`)
+    """
+    startswith = _bin_op("startsWith", _startswith_doc)
+    endswith = _bin_op("endsWith", _endswith_doc)
 
     def like(self: "Column", other: str) -> "Column":
         """

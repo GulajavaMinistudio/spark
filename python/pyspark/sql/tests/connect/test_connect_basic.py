@@ -145,6 +145,16 @@ class SparkConnectTests(SparkConnectSQLTestCase):
             df.select(df.name.substr(0, 1).alias("col")).toPandas(),
             df2.select(df2.name.substr(0, 1).alias("col")).toPandas(),
         )
+        df3 = self.connect.sql("SELECT cast(null as int) as name")
+        df4 = self.spark.sql("SELECT cast(null as int) as name")
+        self.assert_eq(
+            df3.filter(df3.name.isNull()).toPandas(),
+            df4.filter(df4.name.isNull()).toPandas(),
+        )
+        self.assert_eq(
+            df3.filter(df3.name.isNotNull()).toPandas(),
+            df4.filter(df4.name.isNotNull()).toPandas(),
+        )
 
     def test_collect(self):
         df = self.connect.read.table(self.tbl_name)
@@ -361,6 +371,16 @@ class SparkConnectTests(SparkConnectSQLTestCase):
         df2 = self.connect.read.table(self.tbl_name_empty)
         self.assertIsNone(df2.head())
 
+    def test_deduplicate(self):
+        # SPARK-41326: test distinct and dropDuplicates.
+        df = self.connect.read.table(self.tbl_name)
+        df2 = self.spark.read.table(self.tbl_name)
+        self.assert_eq(df.distinct().toPandas(), df2.distinct().toPandas())
+        self.assert_eq(df.dropDuplicates().toPandas(), df2.dropDuplicates().toPandas())
+        self.assert_eq(
+            df.dropDuplicates(["name"]).toPandas(), df2.dropDuplicates(["name"]).toPandas()
+        )
+
     def test_first(self):
         # SPARK-41002: test `first` API in Python Client
         df = self.connect.read.table(self.tbl_name)
@@ -410,6 +430,48 @@ class SparkConnectTests(SparkConnectSQLTestCase):
             ._explain_string(extended=True)
         )
         self.assertTrue("special_alias" in plan_text)
+
+    def test_sort(self):
+        # SPARK-41332: test sort
+        query = """
+            SELECT * FROM VALUES
+            (false, 1, NULL), (false, NULL, 2.0), (NULL, 3, 3.0)
+            AS tab(a, b, c)
+            """
+        # +-----+----+----+
+        # |    a|   b|   c|
+        # +-----+----+----+
+        # |false|   1|null|
+        # |false|null| 2.0|
+        # | null|   3| 3.0|
+        # +-----+----+----+
+
+        cdf = self.connect.sql(query)
+        sdf = self.spark.sql(query)
+        self.assert_eq(
+            cdf.sort("a").toPandas(),
+            sdf.sort("a").toPandas(),
+        )
+        self.assert_eq(
+            cdf.sort("c").toPandas(),
+            sdf.sort("c").toPandas(),
+        )
+        self.assert_eq(
+            cdf.sort("b").toPandas(),
+            sdf.sort("b").toPandas(),
+        )
+        self.assert_eq(
+            cdf.sort(cdf.c, "b").toPandas(),
+            sdf.sort(sdf.c, "b").toPandas(),
+        )
+        self.assert_eq(
+            cdf.sort(cdf.c.desc(), "b").toPandas(),
+            sdf.sort(sdf.c.desc(), "b").toPandas(),
+        )
+        self.assert_eq(
+            cdf.sort(cdf.c.desc(), cdf.a.asc()).toPandas(),
+            sdf.sort(sdf.c.desc(), sdf.a.asc()).toPandas(),
+        )
 
     def test_range(self):
         self.assert_eq(
@@ -583,6 +645,52 @@ class SparkConnectTests(SparkConnectSQLTestCase):
             self.spark.sql(query).na.drop(how="any", thresh=2, subset="a").toPandas(),
         )
 
+    def test_replace(self):
+        # SPARK-41315: Test replace
+        query = """
+            SELECT * FROM VALUES
+            (false, 1, NULL), (false, NULL, 2.0), (NULL, 3, 3.0)
+            AS tab(a, b, c)
+            """
+        # +-----+----+----+
+        # |    a|   b|   c|
+        # +-----+----+----+
+        # |false|   1|null|
+        # |false|null| 2.0|
+        # | null|   3| 3.0|
+        # +-----+----+----+
+
+        self.assert_eq(
+            self.connect.sql(query).replace(2, 3).toPandas(),
+            self.spark.sql(query).replace(2, 3).toPandas(),
+        )
+        self.assert_eq(
+            self.connect.sql(query).na.replace(False, True).toPandas(),
+            self.spark.sql(query).na.replace(False, True).toPandas(),
+        )
+        self.assert_eq(
+            self.connect.sql(query).replace({1: 2, 3: -1}, subset=("a", "b")).toPandas(),
+            self.spark.sql(query).replace({1: 2, 3: -1}, subset=("a", "b")).toPandas(),
+        )
+        self.assert_eq(
+            self.connect.sql(query).na.replace((1, 2), (3, 1)).toPandas(),
+            self.spark.sql(query).na.replace((1, 2), (3, 1)).toPandas(),
+        )
+        self.assert_eq(
+            self.connect.sql(query).na.replace((1, 2), (3, 1), subset=("c", "b")).toPandas(),
+            self.spark.sql(query).na.replace((1, 2), (3, 1), subset=("c", "b")).toPandas(),
+        )
+
+        with self.assertRaises(ValueError) as context:
+            self.connect.sql(query).replace({None: 1}, subset="a").toPandas()
+            self.assertTrue("Mixed type replacements are not supported" in str(context.exception))
+
+        with self.assertRaises(grpc.RpcError) as context:
+            self.connect.sql(query).replace({1: 2, 3: -1}, subset=("a", "x")).toPandas()
+            self.assertIn(
+                """Cannot resolve column name "x" among (a, b, c)""", str(context.exception)
+            )
+
     def test_with_columns(self):
         # SPARK-41256: test withColumn(s).
         self.assert_eq(
@@ -748,6 +856,36 @@ class SparkConnectTests(SparkConnectSQLTestCase):
 
         ndf = self.connect.read.table("parquet_test")
         self.assertEqual(set(df.collect()), set(ndf.collect()))
+
+    def test_agg_with_avg(self):
+        # SPARK-41325: groupby.avg()
+        df = (
+            self.connect.range(10)
+            .groupBy((col("id") % lit(2)).alias("moded"))
+            .avg("id")
+            .sort("moded")
+        )
+        res = df.collect()
+        self.assertEqual(2, len(res))
+        self.assertEqual(4.0, res[0][1])
+        self.assertEqual(5.0, res[1][1])
+
+    def test_crossjoin(self):
+        # SPARK-41227: Test CrossJoin
+        connect_df = self.connect.read.table(self.tbl_name)
+        spark_df = self.spark.read.table(self.tbl_name)
+        self.assert_eq(
+            set(
+                connect_df.select("id")
+                .join(other=connect_df.select("name"), how="cross")
+                .toPandas()
+            ),
+            set(spark_df.select("id").join(other=spark_df.select("name"), how="cross").toPandas()),
+        )
+        self.assert_eq(
+            set(connect_df.select("id").crossJoin(other=connect_df.select("name")).toPandas()),
+            set(spark_df.select("id").crossJoin(other=spark_df.select("name")).toPandas()),
+        )
 
 
 class ChannelBuilderTests(ReusedPySparkTestCase):

@@ -83,7 +83,7 @@ package object dsl {
           .setUnresolvedFunction(
             Expression.UnresolvedFunction
               .newBuilder()
-              .addParts("<")
+              .setFunctionName("<")
               .addArguments(expr)
               .addArguments(other))
           .build()
@@ -93,14 +93,14 @@ package object dsl {
       Expression
         .newBuilder()
         .setUnresolvedFunction(
-          Expression.UnresolvedFunction.newBuilder().addParts("min").addArguments(e))
+          Expression.UnresolvedFunction.newBuilder().setFunctionName("min").addArguments(e))
         .build()
 
     def proto_explode(e: Expression): Expression =
       Expression
         .newBuilder()
         .setUnresolvedFunction(
-          Expression.UnresolvedFunction.newBuilder().addParts("explode").addArguments(e))
+          Expression.UnresolvedFunction.newBuilder().setFunctionName("explode").addArguments(e))
         .build()
 
     /**
@@ -117,7 +117,8 @@ package object dsl {
         .setUnresolvedFunction(
           Expression.UnresolvedFunction
             .newBuilder()
-            .addAllParts(nameParts.asJava)
+            .setFunctionName(nameParts.mkString("."))
+            .setIsUserDefinedFunction(true)
             .addAllArguments(args.asJava))
         .build()
     }
@@ -136,7 +137,7 @@ package object dsl {
         .setUnresolvedFunction(
           Expression.UnresolvedFunction
             .newBuilder()
-            .addParts(name)
+            .setFunctionName(name)
             .addAllArguments(args.asJava))
         .build()
     }
@@ -309,6 +310,31 @@ package object dsl {
         Relation
           .newBuilder()
           .setDropNa(dropna.build())
+          .build()
+      }
+
+      def replace(cols: Seq[String], replacement: Map[Any, Any]): Relation = {
+        require(cols.nonEmpty)
+
+        val replace = proto.NAReplace
+          .newBuilder()
+          .setInput(logicalPlan)
+
+        if (!(cols.length == 1 && cols.head == "*")) {
+          replace.addAllCols(cols.asJava)
+        }
+
+        replacement.foreach { case (oldValue, newValue) =>
+          replace.addReplacements(
+            proto.NAReplace.Replacement
+              .newBuilder()
+              .setOldValue(convertValue(oldValue))
+              .setNewValue(convertValue(newValue)))
+        }
+
+        Relation
+          .newBuilder()
+          .setReplace(replace.build())
           .build()
       }
     }
