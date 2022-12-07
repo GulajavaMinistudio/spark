@@ -24,9 +24,11 @@ from pyspark.sql import SparkSession
 
 if have_pandas:
     from pyspark.sql.connect.session import SparkSession as RemoteSparkSession
+    from pyspark.testing.pandasutils import PandasOnSparkTestCase
+else:
+    from pyspark.testing.sqlutils import ReusedSQLTestCase as PandasOnSparkTestCase  # type: ignore
 from pyspark.sql.dataframe import DataFrame
 from pyspark.testing.connectutils import should_test_connect, connect_requirement_message
-from pyspark.testing.pandasutils import PandasOnSparkTestCase
 from pyspark.testing.utils import ReusedPySparkTestCase
 
 
@@ -357,6 +359,7 @@ class SparkConnectFunctionTests(SparkConnectFuncTestCase):
             (CF.median, SF.median),
             (CF.min, SF.min),
             (CF.mode, SF.mode),
+            (CF.product, SF.product),
             (CF.skewness, SF.skewness),
             (CF.stddev, SF.stddev),
             (CF.stddev_pop, SF.stddev_pop),
@@ -372,7 +375,7 @@ class SparkConnectFunctionTests(SparkConnectFuncTestCase):
                 sdf.select(sfunc("b"), sfunc(sdf.c)).toPandas(),
             )
             self.assert_eq(
-                cdf.groupBy("a").agg([cfunc("b"), cfunc(cdf.c)]).toPandas(),
+                cdf.groupBy("a").agg(cfunc("b"), cfunc(cdf.c)).toPandas(),
                 sdf.groupBy("a").agg(sfunc("b"), sfunc(sdf.c)).toPandas(),
             )
 
@@ -388,7 +391,7 @@ class SparkConnectFunctionTests(SparkConnectFuncTestCase):
                 sdf.select(sfunc(sdf.b, "c")).toPandas(),
             )
             self.assert_eq(
-                cdf.groupBy("a").agg([cfunc(cdf.b, "c")]).toPandas(),
+                cdf.groupBy("a").agg(cfunc(cdf.b, "c")).toPandas(),
                 sdf.groupBy("a").agg(sfunc(sdf.b, "c")).toPandas(),
             )
 
@@ -402,12 +405,73 @@ class SparkConnectFunctionTests(SparkConnectFuncTestCase):
             sdf.select(SF.percentile_approx(sdf.b, [0.1, 0.9])).toPandas(),
         )
         self.assert_eq(
-            cdf.groupBy("a").agg([CF.percentile_approx("b", 0.5)]).toPandas(),
+            cdf.groupBy("a").agg(CF.percentile_approx("b", 0.5)).toPandas(),
             sdf.groupBy("a").agg(SF.percentile_approx("b", 0.5)).toPandas(),
         )
         self.assert_eq(
-            cdf.groupBy("a").agg([CF.percentile_approx(cdf.b, [0.1, 0.9])]).toPandas(),
+            cdf.groupBy("a").agg(CF.percentile_approx(cdf.b, [0.1, 0.9])).toPandas(),
             sdf.groupBy("a").agg(SF.percentile_approx(sdf.b, [0.1, 0.9])).toPandas(),
+        )
+
+    def test_string_functions(self):
+        from pyspark.sql import functions as SF
+        from pyspark.sql.connect import functions as CF
+
+        query = """
+            SELECT * FROM VALUES
+            ('   ab   ', 'ab   ', NULL), ('   ab', NULL, 'ab')
+            AS tab(a, b, c)
+            """
+        # +--------+-----+----+
+        # |       a|    b|   c|
+        # +--------+-----+----+
+        # |   ab   |ab   |null|
+        # |      ab| null|  ab|
+        # +--------+-----+----+
+
+        cdf = self.connect.sql(query)
+        sdf = self.spark.sql(query)
+
+        for cfunc, sfunc in [
+            (CF.upper, SF.upper),
+            (CF.lower, SF.lower),
+            (CF.ascii, SF.ascii),
+            (CF.base64, SF.base64),
+            (CF.unbase64, SF.unbase64),
+            (CF.ltrim, SF.ltrim),
+            (CF.rtrim, SF.rtrim),
+            (CF.trim, SF.trim),
+        ]:
+            self.assert_eq(
+                cdf.select(cfunc("a"), cfunc(cdf.b)).toPandas(),
+                sdf.select(sfunc("a"), sfunc(sdf.b)).toPandas(),
+            )
+
+        self.assert_eq(
+            cdf.select(CF.concat_ws("-", cdf.a, "c")).toPandas(),
+            sdf.select(SF.concat_ws("-", sdf.a, "c")).toPandas(),
+        )
+
+        # Disable the test for "decode" because of inconsistent column names,
+        # as shown below
+        #
+        # >>> sdf.select(SF.decode("c", "UTF-8")).toPandas()
+        # stringdecode(c, UTF-8)
+        # 0                   None
+        # 1                     ab
+        # >>> cdf.select(CF.decode("c", "UTF-8")).toPandas()
+        # decode(c, UTF-8)
+        # 0             None
+        # 1               ab
+        #
+        # self.assert_eq(
+        #     cdf.select(CF.decode("c", "UTF-8")).toPandas(),
+        #     sdf.select(SF.decode("c", "UTF-8")).toPandas(),
+        # )
+
+        self.assert_eq(
+            cdf.select(CF.encode("c", "UTF-8")).toPandas(),
+            sdf.select(SF.encode("c", "UTF-8")).toPandas(),
         )
 
 
