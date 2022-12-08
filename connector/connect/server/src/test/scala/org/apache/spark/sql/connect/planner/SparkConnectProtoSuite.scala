@@ -375,6 +375,12 @@ class SparkConnectProtoSuite extends PlanTest with SparkConnectPlanTest {
       sparkTestRelation.summary("count", "mean", "stddev"))
   }
 
+  test("Test describe") {
+    comparePlans(
+      connectTestRelation.describe("id", "name"),
+      sparkTestRelation.describe("id", "name"))
+  }
+
   test("Test crosstab") {
     comparePlans(
       connectTestRelation.stat.crosstab("id", "name"),
@@ -544,6 +550,14 @@ class SparkConnectProtoSuite extends PlanTest with SparkConnectPlanTest {
       connectTestRelation.select("id".protoAttr.cast(
         proto.DataType.newBuilder().setString(proto.DataType.String.getDefaultInstance).build())),
       sparkTestRelation.select(col("id").cast(StringType)))
+
+    comparePlans(
+      connectTestRelation.select("id".protoAttr.cast("string")),
+      sparkTestRelation.select(col("id").cast("string")))
+  }
+
+  test("Test Hint") {
+    comparePlans(connectTestRelation.hint("COALESCE", 3), sparkTestRelation.hint("COALESCE", 3))
   }
 
   private def createLocalRelationProtoByAttributeReferences(

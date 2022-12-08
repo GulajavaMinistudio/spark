@@ -15,27 +15,18 @@
  * limitations under the License.
  */
 
-package org.apache.spark.sql.connector.read;
+package org.apache.spark.sql.connect.planner
 
-import java.util.Map;
-import java.util.Optional;
-import java.util.OptionalLong;
+import org.scalatest.funsuite.AnyFunSuite
 
-import org.apache.spark.annotation.Evolving;
-import org.apache.spark.sql.connector.expressions.NamedReference;
-import org.apache.spark.sql.connector.read.colstats.ColumnStatistics;
+import org.apache.spark.sql.connect.planner.LiteralValueProtoConverter.{toCatalystValue, toConnectProtoValue}
 
-/**
- * An interface to represent statistics for a data source, which is returned by
- * {@link SupportsReportStatistics#estimateStatistics()}.
- *
- * @since 3.0.0
- */
-@Evolving
-public interface Statistics {
-  OptionalLong sizeInBytes();
-  OptionalLong numRows();
-  default Optional<Map<NamedReference, ColumnStatistics>> columnStats() {
-    return Optional.empty();
+class LiteralValueProtoConverterSuite extends AnyFunSuite {
+
+  test("basic proto value and catalyst value conversion") {
+    val values = Array(null, true, 1.toByte, 1.toShort, 1, 1L, 1.1d, 1.1f, "spark")
+    for (v <- values) {
+      assertResult(v)(toCatalystValue(toConnectProtoValue(v)))
+    }
   }
 }

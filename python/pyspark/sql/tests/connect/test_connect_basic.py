@@ -21,7 +21,6 @@ import tempfile
 
 import grpc  # type: ignore
 
-from pyspark.sql.connect.column import Column
 from pyspark.testing.sqlutils import have_pandas, SQLTestUtils
 
 if have_pandas:
@@ -33,6 +32,7 @@ from pyspark.sql.types import StructType, StructField, LongType, StringType
 if have_pandas:
     from pyspark.sql.connect.session import SparkSession as RemoteSparkSession
     from pyspark.sql.connect.client import ChannelBuilder
+    from pyspark.sql.connect.column import Column
     from pyspark.sql.connect.dataframe import DataFrame as CDataFrame
     from pyspark.sql.connect.function_builder import udf
     from pyspark.sql.connect.functions import lit, col
@@ -120,6 +120,35 @@ class SparkConnectTests(SparkConnectSQLTestCase):
         data = df.limit(10).toPandas()
         # Check that the limit is applied
         self.assertEqual(len(data.index), 10)
+
+    def test_json(self):
+        with tempfile.TemporaryDirectory() as d:
+            # Write a DataFrame into a JSON file
+            self.spark.createDataFrame([{"age": 100, "name": "Hyukjin Kwon"}]).write.mode(
+                "overwrite"
+            ).format("json").save(d)
+            # Read the JSON file as a DataFrame.
+            self.assert_eq(self.connect.read.json(d).toPandas(), self.spark.read.json(d).toPandas())
+            self.assert_eq(
+                self.connect.read.json(path=d, schema="age INT, name STRING").toPandas(),
+                self.spark.read.json(path=d, schema="age INT, name STRING").toPandas(),
+            )
+            self.assert_eq(
+                self.connect.read.json(path=d, primitivesAsString=True).toPandas(),
+                self.spark.read.json(path=d, primitivesAsString=True).toPandas(),
+            )
+
+    def test_paruqet(self):
+        # SPARK-41445: Implement DataFrameReader.paruqet
+        with tempfile.TemporaryDirectory() as d:
+            # Write a DataFrame into a JSON file
+            self.spark.createDataFrame([{"age": 100, "name": "Hyukjin Kwon"}]).write.mode(
+                "overwrite"
+            ).format("parquet").save(d)
+            # Read the Parquet file as a DataFrame.
+            self.assert_eq(
+                self.connect.read.parquet(d).toPandas(), self.spark.read.parquet(d).toPandas()
+            )
 
     def test_join_condition_column_list_columns(self):
         left_connect_df = self.connect.read.table(self.tbl_name)
