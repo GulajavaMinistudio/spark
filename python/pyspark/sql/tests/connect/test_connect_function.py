@@ -14,22 +14,17 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 #
-from typing import Any
 import unittest
 import tempfile
 
-from pyspark.testing.sqlutils import have_pandas, SQLTestUtils
-
 from pyspark.sql import SparkSession
-
-if have_pandas:
-    from pyspark.sql.connect.session import SparkSession as RemoteSparkSession
-    from pyspark.testing.pandasutils import PandasOnSparkTestCase
-else:
-    from pyspark.testing.sqlutils import ReusedSQLTestCase as PandasOnSparkTestCase  # type: ignore
-from pyspark.sql.dataframe import DataFrame
+from pyspark.testing.pandasutils import PandasOnSparkTestCase
 from pyspark.testing.connectutils import should_test_connect, connect_requirement_message
 from pyspark.testing.utils import ReusedPySparkTestCase
+from pyspark.testing.sqlutils import SQLTestUtils
+
+if should_test_connect:
+    from pyspark.sql.connect.session import SparkSession as RemoteSparkSession
 
 
 @unittest.skipIf(not should_test_connect, connect_requirement_message)
@@ -37,15 +32,8 @@ class SparkConnectFuncTestCase(PandasOnSparkTestCase, ReusedPySparkTestCase, SQL
     """Parent test fixture class for all Spark Connect related
     test cases."""
 
-    if have_pandas:
-        connect: RemoteSparkSession
-    tbl_name: str
-    tbl_name_empty: str
-    df_text: "DataFrame"
-    spark: SparkSession
-
     @classmethod
-    def setUpClass(cls: Any):
+    def setUpClass(cls):
         ReusedPySparkTestCase.setUpClass()
         cls.tempdir = tempfile.NamedTemporaryFile(delete=False)
         cls.hive_available = True
@@ -55,7 +43,7 @@ class SparkConnectFuncTestCase(PandasOnSparkTestCase, ReusedPySparkTestCase, SQL
         cls.connect = RemoteSparkSession.builder.remote().getOrCreate()
 
     @classmethod
-    def tearDownClass(cls: Any) -> None:
+    def tearDownClass(cls):
         ReusedPySparkTestCase.tearDownClass()
 
 
@@ -63,7 +51,7 @@ class SparkConnectFunctionTests(SparkConnectFuncTestCase):
     """These test cases exercise the interface to the proto plan
     generation but do not call Spark."""
 
-    def compare_by_show(self, df1: Any, df2: Any):
+    def compare_by_show(self, df1, df2):
         from pyspark.sql.dataframe import DataFrame as SDF
         from pyspark.sql.connect.dataframe import DataFrame as CDF
 
@@ -623,26 +611,162 @@ class SparkConnectFunctionTests(SparkConnectFuncTestCase):
             sdf.select(SF.concat_ws("-", sdf.a, "c")).toPandas(),
         )
 
-        # Disable the test for "decode" because of inconsistent column names,
-        # as shown below
-        #
-        # >>> sdf.select(SF.decode("c", "UTF-8")).toPandas()
-        # stringdecode(c, UTF-8)
-        # 0                   None
-        # 1                     ab
-        # >>> cdf.select(CF.decode("c", "UTF-8")).toPandas()
-        # decode(c, UTF-8)
-        # 0             None
-        # 1               ab
-        #
-        # self.assert_eq(
-        #     cdf.select(CF.decode("c", "UTF-8")).toPandas(),
-        #     sdf.select(SF.decode("c", "UTF-8")).toPandas(),
-        # )
+        self.assert_eq(
+            cdf.select(CF.decode("c", "UTF-8")).toPandas(),
+            sdf.select(SF.decode("c", "UTF-8")).toPandas(),
+        )
 
         self.assert_eq(
             cdf.select(CF.encode("c", "UTF-8")).toPandas(),
             sdf.select(SF.encode("c", "UTF-8")).toPandas(),
+        )
+
+    # TODO(SPARK-41283): To compare toPandas for test cases with dtypes marked
+    def test_date_ts_functions(self):
+        from pyspark.sql import functions as SF
+        from pyspark.sql.connect import functions as CF
+
+        query = """
+            SELECT * FROM VALUES
+            ('1997/02/28 10:30:00', '2023/03/01 06:00:00', 'JST', 1428476400, 2020, 12, 6),
+            ('2000/01/01 04:30:05', '2020/05/01 12:15:00', 'PST', 1403892395, 2022, 12, 6)
+            AS tab(ts1, ts2, tz, seconds, Y, M, D)
+            """
+        # +-------------------+-------------------+---+----------+----+---+---+
+        # |                ts1|                ts2| tz|   seconds|   Y|  M|  D|
+        # +-------------------+-------------------+---+----------+----+---+---+
+        # |1997/02/28 10:30:00|2023/03/01 06:00:00|JST|1428476400|2020| 12|  6|
+        # |2000/01/01 04:30:05|2020/05/01 12:15:00|PST|1403892395|2022| 12|  6|
+        # +-------------------+-------------------+---+----------+----+---+---+
+
+        cdf = self.connect.sql(query)
+        sdf = self.spark.sql(query)
+
+        # With no parameters
+        for cfunc, sfunc in [
+            (CF.current_date, SF.current_date),
+        ]:
+            self.assert_eq(
+                cdf.select(cfunc()).toPandas(),
+                sdf.select(sfunc()).toPandas(),
+            )
+
+        # current_timestamp
+        # [left]:  datetime64[ns, America/Los_Angeles]
+        # [right]: datetime64[ns]
+        # TODO: compare the return values after resolving dtypes difference
+        self.assertEqual(
+            cdf.select(CF.current_timestamp()).count(),
+            sdf.select(SF.current_timestamp()).count(),
+        )
+
+        # localtimestamp
+        s_pdf0 = sdf.select(SF.localtimestamp()).toPandas()
+        c_pdf = cdf.select(CF.localtimestamp()).toPandas()
+        s_pdf1 = sdf.select(SF.localtimestamp()).toPandas()
+        self.assert_eq(s_pdf0 < c_pdf, c_pdf < s_pdf1)
+
+        # With only column parameter
+        for cfunc, sfunc in [
+            (CF.year, SF.year),
+            (CF.quarter, SF.quarter),
+            (CF.month, SF.month),
+            (CF.dayofweek, SF.dayofweek),
+            (CF.dayofmonth, SF.dayofmonth),
+            (CF.dayofyear, SF.dayofyear),
+            (CF.hour, SF.hour),
+            (CF.minute, SF.minute),
+            (CF.second, SF.second),
+            (CF.weekofyear, SF.weekofyear),
+            (CF.last_day, SF.last_day),
+            (CF.unix_timestamp, SF.unix_timestamp),
+        ]:
+            self.assert_eq(
+                cdf.select(cfunc(cdf.ts1)).toPandas(),
+                sdf.select(sfunc(sdf.ts1)).toPandas(),
+            )
+
+        # With format parameter
+        for cfunc, sfunc in [
+            (CF.date_format, SF.date_format),
+            (CF.to_date, SF.to_date),
+        ]:
+            self.assert_eq(
+                cdf.select(cfunc(cdf.ts1, format="yyyy-MM-dd")).toPandas(),
+                sdf.select(sfunc(sdf.ts1, format="yyyy-MM-dd")).toPandas(),
+            )
+        self.compare_by_show(
+            # [left]:  datetime64[ns, America/Los_Angeles]
+            # [right]: datetime64[ns]
+            cdf.select(CF.to_timestamp(cdf.ts1, format="yyyy-MM-dd")),
+            sdf.select(SF.to_timestamp(sdf.ts1, format="yyyy-MM-dd")),
+        )
+
+        # With tz parameter
+        for cfunc, sfunc in [
+            (CF.from_utc_timestamp, SF.from_utc_timestamp),
+            (CF.to_utc_timestamp, SF.to_utc_timestamp),
+            # [left]:  datetime64[ns, America/Los_Angeles]
+            # [right]: datetime64[ns]
+        ]:
+            self.compare_by_show(
+                cdf.select(cfunc(cdf.ts1, tz=cdf.tz)),
+                sdf.select(sfunc(sdf.ts1, tz=sdf.tz)),
+            )
+
+        # With numeric parameter
+        for cfunc, sfunc in [
+            (CF.date_add, SF.date_add),
+            (CF.date_sub, SF.date_sub),
+            (CF.add_months, SF.add_months),
+        ]:
+            self.assert_eq(
+                cdf.select(cfunc(cdf.ts1, cdf.D)).toPandas(),
+                sdf.select(sfunc(sdf.ts1, sdf.D)).toPandas(),
+            )
+
+        # With another timestamp as parameter
+        for cfunc, sfunc in [
+            (CF.datediff, SF.datediff),
+            (CF.months_between, SF.months_between),
+        ]:
+            self.assert_eq(
+                cdf.select(cfunc(cdf.ts1, cdf.ts2)).toPandas(),
+                sdf.select(sfunc(sdf.ts1, sdf.ts2)).toPandas(),
+            )
+
+        # With seconds parameter
+        self.compare_by_show(
+            # [left]:  datetime64[ns, America/Los_Angeles]
+            # [right]: datetime64[ns]
+            cdf.select(CF.timestamp_seconds(cdf.seconds)),
+            sdf.select(SF.timestamp_seconds(sdf.seconds)),
+        )
+
+        # make_date
+        self.assert_eq(
+            cdf.select(CF.make_date(cdf.Y, cdf.M, cdf.D)).toPandas(),
+            sdf.select(SF.make_date(sdf.Y, sdf.M, sdf.D)).toPandas(),
+        )
+
+        # date_trunc
+        self.compare_by_show(
+            # [left]:  datetime64[ns, America/Los_Angeles]
+            # [right]: datetime64[ns]
+            cdf.select(CF.date_trunc("day", cdf.ts1)),
+            sdf.select(SF.date_trunc("day", sdf.ts1)),
+        )
+
+        # trunc
+        self.assert_eq(
+            cdf.select(CF.trunc(cdf.ts1, "year")).toPandas(),
+            sdf.select(SF.trunc(sdf.ts1, "year")).toPandas(),
+        )
+
+        # next_day
+        self.assert_eq(
+            cdf.select(CF.next_day(cdf.ts1, "Mon")).toPandas(),
+            sdf.select(SF.next_day(sdf.ts1, "Mon")).toPandas(),
         )
 
 
