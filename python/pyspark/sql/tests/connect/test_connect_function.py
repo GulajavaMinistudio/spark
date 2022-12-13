@@ -24,6 +24,7 @@ from pyspark.testing.utils import ReusedPySparkTestCase
 from pyspark.testing.sqlutils import SQLTestUtils
 
 if should_test_connect:
+    import grpc
     from pyspark.sql.connect.session import SparkSession as RemoteSparkSession
 
 
@@ -460,6 +461,8 @@ class SparkConnectFunctionTests(SparkConnectFuncTestCase):
             (CF.array_distinct, SF.array_distinct),
             (CF.array_max, SF.array_max),
             (CF.array_min, SF.array_min),
+            (CF.reverse, SF.reverse),
+            (CF.size, SF.size),
         ]:
             self.assert_eq(
                 cdf.select(cfunc("a"), cfunc(cdf.b)).toPandas(),
@@ -592,6 +595,31 @@ class SparkConnectFunctionTests(SparkConnectFuncTestCase):
             sdf.select(SF.get(sdf.a, 1)).toPandas(),
         )
 
+        # test shuffle
+        # Can not compare the values due to the random permutation
+        self.assertEqual(
+            cdf.select(CF.shuffle(cdf.a), CF.shuffle("b")).count(),
+            sdf.select(SF.shuffle(sdf.a), SF.shuffle("b")).count(),
+        )
+
+        # test slice
+        self.assert_eq(
+            cdf.select(CF.slice(cdf.a, 1, 2), CF.slice("c", 2, 3)).toPandas(),
+            sdf.select(SF.slice(sdf.a, 1, 2), SF.slice("c", 2, 3)).toPandas(),
+        )
+
+        # test sort_array
+        self.assert_eq(
+            cdf.select(CF.sort_array(cdf.a, True), CF.sort_array("c", False)).toPandas(),
+            sdf.select(SF.sort_array(sdf.a, True), SF.sort_array("c", False)).toPandas(),
+        )
+
+        # test struct
+        self.compare_by_show(
+            cdf.select(CF.struct(cdf.a, "d", "e", cdf.f)),
+            sdf.select(SF.struct(sdf.a, "d", "e", sdf.f)),
+        )
+
     def test_map_collection_functions(self):
         from pyspark.sql import functions as SF
         from pyspark.sql.connect import functions as CF
@@ -642,6 +670,12 @@ class SparkConnectFunctionTests(SparkConnectFuncTestCase):
         self.compare_by_show(
             cdf.select(CF.map_keys(cdf.a), CF.map_values("b")),
             sdf.select(SF.map_keys(sdf.a), SF.map_values("b")),
+        )
+
+        # test size
+        self.assert_eq(
+            cdf.select(CF.size(cdf.a), CF.size("c")).toPandas(),
+            sdf.select(SF.size(sdf.a), SF.size("c")).toPandas(),
         )
 
     def test_generator_functions(self):
@@ -733,6 +767,44 @@ class SparkConnectFunctionTests(SparkConnectFuncTestCase):
             .toPandas(),
         )
 
+        # test posexplode with arrays
+        self.assert_eq(
+            cdf.select(CF.posexplode(cdf.a), CF.col("b")).toPandas(),
+            sdf.select(SF.posexplode(sdf.a), SF.col("b")).toPandas(),
+        )
+        self.assert_eq(
+            cdf.select(CF.posexplode("a"), "b").toPandas(),
+            sdf.select(SF.posexplode("a"), "b").toPandas(),
+        )
+        # test posexplode with maps
+        self.assert_eq(
+            cdf.select(CF.posexplode(cdf.d), CF.col("c")).toPandas(),
+            sdf.select(SF.posexplode(sdf.d), SF.col("c")).toPandas(),
+        )
+        self.assert_eq(
+            cdf.select(CF.posexplode("d"), "c").toPandas(),
+            sdf.select(SF.posexplode("d"), "c").toPandas(),
+        )
+
+        # test posexplode_outer with arrays
+        self.assert_eq(
+            cdf.select(CF.posexplode_outer(cdf.a), CF.col("b")).toPandas(),
+            sdf.select(SF.posexplode_outer(sdf.a), SF.col("b")).toPandas(),
+        )
+        self.assert_eq(
+            cdf.select(CF.posexplode_outer("a"), "b").toPandas(),
+            sdf.select(SF.posexplode_outer("a"), "b").toPandas(),
+        )
+        # test posexplode_outer with maps
+        self.assert_eq(
+            cdf.select(CF.posexplode_outer(cdf.d), CF.col("c")).toPandas(),
+            sdf.select(SF.posexplode_outer(sdf.d), SF.col("c")).toPandas(),
+        )
+        self.assert_eq(
+            cdf.select(CF.posexplode_outer("d"), "c").toPandas(),
+            sdf.select(SF.posexplode_outer("d"), "c").toPandas(),
+        )
+
     def test_csv_functions(self):
         from pyspark.sql import functions as SF
         from pyspark.sql.connect import functions as CF
@@ -773,6 +845,18 @@ class SparkConnectFunctionTests(SparkConnectFuncTestCase):
                 SF.from_csv(sdf.a, SF.lit("a INT, b INT, c INT")),
                 SF.from_csv("b", SF.lit("x STRING, y STRING, z DOUBLE")),
             ),
+        )
+
+        # test schema_of_csv
+        self.assert_eq(
+            cdf.select(CF.schema_of_csv(CF.lit('{"a": 0}'))).toPandas(),
+            sdf.select(SF.schema_of_csv(SF.lit('{"a": 0}'))).toPandas(),
+        )
+
+        # test to_csv
+        self.compare_by_show(
+            cdf.select(CF.to_csv(CF.struct(CF.lit("a"), CF.lit("b")))),
+            sdf.select(SF.to_csv(SF.struct(SF.lit("a"), SF.lit("b")))),
         )
 
     def test_json_functions(self):
@@ -846,6 +930,18 @@ class SparkConnectFunctionTests(SparkConnectFuncTestCase):
             sdf.select(SF.json_tuple(sdf.c, "f1", "f2")).toPandas(),
         )
 
+        # test schema_of_json
+        self.assert_eq(
+            cdf.select(CF.schema_of_json(CF.lit('{"a": 0}'))).toPandas(),
+            sdf.select(SF.schema_of_json(SF.lit('{"a": 0}'))).toPandas(),
+        )
+
+        # test to_json
+        self.compare_by_show(
+            cdf.select(CF.to_json(CF.struct(CF.lit("a"), CF.lit("b")))),
+            sdf.select(SF.to_json(SF.struct(SF.lit("a"), SF.lit("b")))),
+        )
+
     def test_string_functions(self):
         from pyspark.sql import functions as SF
         from pyspark.sql.connect import functions as CF
@@ -874,6 +970,7 @@ class SparkConnectFunctionTests(SparkConnectFuncTestCase):
             (CF.ltrim, SF.ltrim),
             (CF.rtrim, SF.rtrim),
             (CF.trim, SF.trim),
+            (CF.reverse, SF.reverse),
         ]:
             self.assert_eq(
                 cdf.select(cfunc("a"), cfunc(cdf.b)).toPandas(),
@@ -1041,6 +1138,71 @@ class SparkConnectFunctionTests(SparkConnectFuncTestCase):
         self.assert_eq(
             cdf.select(CF.next_day(cdf.ts1, "Mon")).toPandas(),
             sdf.select(SF.next_day(sdf.ts1, "Mon")).toPandas(),
+        )
+
+    def test_misc_functions(self):
+        from pyspark.sql import functions as SF
+        from pyspark.sql.connect import functions as CF
+
+        query = """
+            SELECT a, b, c, BINARY(c) as d FROM VALUES
+            (0, float("NAN"), 'x'), (1, NULL, 'y'), (1, 2.1, 'z'), (0, 0.5, NULL)
+            AS tab(a, b, c)
+            """
+        # +---+----+----+----+
+        # |  a|   b|   c|   d|
+        # +---+----+----+----+
+        # |  0| NaN|   x|[78]|
+        # |  1|null|   y|[79]|
+        # |  1| 2.1|   z|[7A]|
+        # |  0| 0.5|null|null|
+        # +---+----+----+----+
+
+        cdf = self.connect.sql(query)
+        sdf = self.spark.sql(query)
+
+        # test assert_true
+        with self.assertRaises(grpc.RpcError):
+            cdf.select(CF.assert_true(cdf.a > 0, "a should be positive!")).show()
+
+        # test raise_error
+        with self.assertRaises(grpc.RpcError):
+            cdf.select(CF.raise_error("a should be positive!")).show()
+
+        # test crc32
+        self.assert_eq(
+            cdf.select(CF.crc32(cdf.d)).toPandas(),
+            sdf.select(SF.crc32(sdf.d)).toPandas(),
+        )
+
+        # test hash
+        self.assert_eq(
+            cdf.select(CF.hash(cdf.a, "b", cdf.c)).toPandas(),
+            sdf.select(SF.hash(sdf.a, "b", sdf.c)).toPandas(),
+        )
+
+        # test xxhash64
+        self.assert_eq(
+            cdf.select(CF.xxhash64(cdf.a, "b", cdf.c)).toPandas(),
+            sdf.select(SF.xxhash64(sdf.a, "b", sdf.c)).toPandas(),
+        )
+
+        # test md5
+        self.assert_eq(
+            cdf.select(CF.md5(cdf.d), CF.md5("c")).toPandas(),
+            sdf.select(SF.md5(sdf.d), SF.md5("c")).toPandas(),
+        )
+
+        # test sha1
+        self.assert_eq(
+            cdf.select(CF.sha1(cdf.d), CF.sha1("c")).toPandas(),
+            sdf.select(SF.sha1(sdf.d), SF.sha1("c")).toPandas(),
+        )
+
+        # test sha2
+        self.assert_eq(
+            cdf.select(CF.sha2(cdf.c, 256), CF.sha2("d", 512)).toPandas(),
+            sdf.select(SF.sha2(sdf.c, 256), SF.sha2("d", 512)).toPandas(),
         )
 
 
