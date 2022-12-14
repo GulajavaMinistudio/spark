@@ -5,6 +5,12 @@
     ],
     "sqlState" : "42000"
   },
+  "AMBIGUOUS_LATERAL_COLUMN_ALIAS" : {
+    "message" : [
+      "Lateral column alias <name> is ambiguous and has <n> matches."
+    ],
+    "sqlState" : "42000"
+  },
   "AMBIGUOUS_REFERENCE" : {
     "message" : [
       "Reference <name> is ambiguous, could be: <referenceNames>."
@@ -943,7 +949,7 @@
   },
   "NUM_COLUMNS_MISMATCH" : {
     "message" : [
-      "<operator> can only be performed on tables with the same number of columns, but the first table has <refNumColumns> columns and the <invalidOrdinalNum> table has <invalidNumColumns> columns."
+      "<operator> can only be performed on inputs with the same number of columns, but the first input has <firstNumColumns> columns and the <invalidOrdinalNum> input has <invalidNumColumns> columns."
     ]
   },
   "ORDER_BY_POS_OUT_OF_RANGE" : {
@@ -1268,6 +1274,11 @@
           "AES-<mode> with the padding <padding> by the <functionName> function."
         ]
       },
+      "ANALYZE_UNCACHED_TEMP_VIEW" : {
+        "message" : [
+          "The ANALYZE TABLE FOR COLUMNS command can operate on temporary views that have been cached already. Consider to cache the view <viewName>."
+        ]
+      },
       "CATALOG_OPERATION" : {
         "message" : [
           "Catalog <catalogName> does not support <operation>."
@@ -1460,6 +1471,11 @@
           "A correlated outer name reference within a subquery expression body was not found in the enclosing query: <value>"
         ]
       },
+      "CORRELATED_REFERENCE" : {
+        "message" : [
+          "Expressions referencing the outer query are not supported outside of WHERE/HAVING clauses: <sqlExprs>"
+        ]
+      },
       "LATERAL_JOIN_CONDITION_NON_DETERMINISTIC" : {
         "message" : [
           "Lateral join condition cannot be non-deterministic: <condition>"
@@ -1483,11 +1499,6 @@
       "NON_DETERMINISTIC_LATERAL_SUBQUERIES" : {
         "message" : [
           "Non-deterministic lateral subqueries are not supported when joining with outer relations that produce more than one row<treeNode>"
-        ]
-      },
-      "UNSUPPORTED_CORRELATED_REFERENCE" : {
-        "message" : [
-          "Expressions referencing the outer query are not supported outside of WHERE/HAVING clauses<treeNode>"
         ]
       },
       "UNSUPPORTED_CORRELATED_REFERENCE_DATA_TYPE" : {
@@ -1537,8 +1548,20 @@
   },
   "WRONG_NUM_ARGS" : {
     "message" : [
-      "The <functionName> requires <expectedNum> parameters but the actual number is <actualNum>."
-    ]
+      "Invalid number of arguments for the function <functionName>."
+    ],
+    "subClass" : {
+      "WITHOUT_SUGGESTION" : {
+        "message" : [
+          "Please, refer to 'https://spark.apache.org/docs/latest/sql-ref-functions.html' for a fix."
+        ]
+      },
+      "WITH_SUGGESTION" : {
+        "message" : [
+          "Consider to change the number of arguments because the function requires <expectedNum> parameters but the actual number is <actualNum>."
+        ]
+      }
+    }
   },
   "_LEGACY_ERROR_TEMP_0001" : {
     "message" : [
@@ -2005,11 +2028,6 @@
   "_LEGACY_ERROR_TEMP_1041" : {
     "message" : [
       "Undefined function <name>."
-    ]
-  },
-  "_LEGACY_ERROR_TEMP_1043" : {
-    "message" : [
-      "Invalid arguments for function <name>."
     ]
   },
   "_LEGACY_ERROR_TEMP_1045" : {
@@ -2862,11 +2880,6 @@
   "_LEGACY_ERROR_TEMP_1232" : {
     "message" : [
       "Partition spec is invalid. The spec (<specKeys>) must match the partition spec (<partitionColumnNames>) defined in table '<tableName>'."
-    ]
-  },
-  "_LEGACY_ERROR_TEMP_1234" : {
-    "message" : [
-      "Temporary view <tableIdent> is not cached for analyzing columns."
     ]
   },
   "_LEGACY_ERROR_TEMP_1235" : {
