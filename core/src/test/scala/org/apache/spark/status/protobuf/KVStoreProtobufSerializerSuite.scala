@@ -459,6 +459,30 @@ class KVStoreProtobufSerializerSuite extends SparkFunSuite {
     }
   }
 
+  test("Stream Block Data") {
+    val input = new StreamBlockData(
+      name = "a",
+      executorId = "executor-1",
+      hostPort = "123",
+      storageLevel = "LOCAL",
+      useMemory = true,
+      useDisk = false,
+      deserialized = true,
+      memSize = 1L,
+      diskSize = 2L)
+    val bytes = serializer.serialize(input)
+    val result = serializer.deserialize(bytes, classOf[StreamBlockData])
+    assert(result.name == input.name)
+    assert(result.executorId == input.executorId)
+    assert(result.hostPort == input.hostPort)
+    assert(result.storageLevel == input.storageLevel)
+    assert(result.useMemory == input.useMemory)
+    assert(result.useDisk == input.useDisk)
+    assert(result.deserialized == input.deserialized)
+    assert(result.memSize == input.memSize)
+    assert(result.diskSize == input.diskSize)
+  }
+
   test("Resource Profile") {
     val input = new ResourceProfileWrapper(
       rpInfo = new ResourceProfileInfo(
@@ -499,6 +523,76 @@ class KVStoreProtobufSerializerSuite extends SparkFunSuite {
       assert(input.rpInfo.taskResources.contains(k))
       assert(result.rpInfo.taskResources(k) == input.rpInfo.taskResources(k))
     }
+  }
+
+  test("CachedQuantile") {
+    val input = new CachedQuantile(
+      stageId = 1,
+      stageAttemptId = 2,
+      quantile = "a",
+      taskCount = 3L,
+      duration = 4L,
+      executorDeserializeTime = 5.1,
+      executorDeserializeCpuTime = 6.1,
+      executorRunTime = 7.1,
+      executorCpuTime = 8.1,
+      resultSize = 9.1,
+      jvmGcTime = 10.1,
+      resultSerializationTime = 11.1,
+      gettingResultTime = 12.1,
+      schedulerDelay = 13.1,
+      peakExecutionMemory = 14.1,
+      memoryBytesSpilled = 15.1,
+      diskBytesSpilled = 16.1,
+      bytesRead = 17.1,
+      recordsRead = 18.1,
+      bytesWritten = 19.1,
+      recordsWritten = 20.1,
+      shuffleReadBytes = 21.1,
+      shuffleRecordsRead = 22.1,
+      shuffleRemoteBlocksFetched = 23.1,
+      shuffleLocalBlocksFetched = 24.1,
+      shuffleFetchWaitTime = 25.1,
+      shuffleRemoteBytesRead = 26.1,
+      shuffleRemoteBytesReadToDisk = 27.1,
+      shuffleTotalBlocksFetched = 28.1,
+      shuffleWriteBytes = 29.1,
+      shuffleWriteRecords = 30.1,
+      shuffleWriteTime = 31.1)
+    val bytes = serializer.serialize(input)
+    val result = serializer.deserialize(bytes, classOf[CachedQuantile])
+    assert(result.stageId == input.stageId)
+    assert(result.stageAttemptId == input.stageAttemptId)
+    assert(result.quantile == input.quantile)
+    assert(result.taskCount == input.taskCount)
+    assert(result.duration == input.duration)
+    assert(result.executorDeserializeTime == input.executorDeserializeTime)
+    assert(result.executorDeserializeCpuTime == input.executorDeserializeCpuTime)
+    assert(result.executorRunTime == input.executorRunTime)
+    assert(result.executorCpuTime == input.executorCpuTime)
+    assert(result.resultSize == input.resultSize)
+    assert(result.jvmGcTime == input.jvmGcTime)
+    assert(result.resultSerializationTime == input.resultSerializationTime)
+    assert(result.gettingResultTime == input.gettingResultTime)
+    assert(result.schedulerDelay == input.schedulerDelay)
+    assert(result.peakExecutionMemory == input.peakExecutionMemory)
+    assert(result.memoryBytesSpilled == input.memoryBytesSpilled)
+    assert(result.diskBytesSpilled == input.diskBytesSpilled)
+    assert(result.bytesRead == input.bytesRead)
+    assert(result.recordsRead == input.recordsRead)
+    assert(result.bytesWritten == input.bytesWritten)
+    assert(result.recordsWritten == input.recordsWritten)
+    assert(result.shuffleReadBytes == input.shuffleReadBytes)
+    assert(result.shuffleRecordsRead == input.shuffleRecordsRead)
+    assert(result.shuffleRemoteBlocksFetched == input.shuffleRemoteBlocksFetched)
+    assert(result.shuffleLocalBlocksFetched == input.shuffleLocalBlocksFetched)
+    assert(result.shuffleFetchWaitTime == input.shuffleFetchWaitTime)
+    assert(result.shuffleRemoteBytesRead == input.shuffleRemoteBytesRead)
+    assert(result.shuffleRemoteBytesReadToDisk == input.shuffleRemoteBytesReadToDisk)
+    assert(result.shuffleTotalBlocksFetched == input.shuffleTotalBlocksFetched)
+    assert(result.shuffleWriteBytes == input.shuffleWriteBytes)
+    assert(result.shuffleWriteRecords == input.shuffleWriteRecords)
+    assert(result.shuffleWriteTime == input.shuffleWriteTime)
   }
 
   test("Speculation Stage Summary") {
