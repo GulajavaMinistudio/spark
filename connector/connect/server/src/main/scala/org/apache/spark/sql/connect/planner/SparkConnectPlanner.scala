@@ -646,6 +646,27 @@ class SparkConnectPlanner(session: SparkSession) {
         }
         Some(NthValue(children(0), children(1), ignoreNulls))
 
+      case "bucket" if fun.getArgumentsCount == 2 =>
+        val children = fun.getArgumentsList.asScala.toSeq.map(transformExpression)
+        (children.head, children.last) match {
+          case (numBuckets: Literal, child) if numBuckets.dataType == IntegerType =>
+            Some(Bucket(numBuckets, child))
+          case (other, _) =>
+            throw InvalidPlanInput(s"numBuckets should be a literal integer, but got $other")
+        }
+
+      case "years" if fun.getArgumentsCount == 1 =>
+        Some(Years(transformExpression(fun.getArguments(0))))
+
+      case "months" if fun.getArgumentsCount == 1 =>
+        Some(Months(transformExpression(fun.getArguments(0))))
+
+      case "days" if fun.getArgumentsCount == 1 =>
+        Some(Days(transformExpression(fun.getArguments(0))))
+
+      case "hours" if fun.getArgumentsCount == 1 =>
+        Some(Hours(transformExpression(fun.getArguments(0))))
+
       case _ => None
     }
   }
@@ -874,32 +895,72 @@ class SparkConnectPlanner(session: SparkSession) {
   }
 
   private def transformAggregate(rel: proto.Aggregate): LogicalPlan = {
-    assert(rel.hasInput)
+    if (!rel.hasInput) {
+      throw InvalidPlanInput("Aggregate needs a plan input")
+    }
+    val input = transformRelation(rel.getInput)
 
-    val groupingExprs =
-      rel.getGroupingExpressionsList.asScala
-        .map(transformExpression)
-        .map {
-          case ua @ UnresolvedAttribute(_) => ua
-          case a @ Alias(_, _) => a
-          case x => UnresolvedAlias(x)
+    def toNamedExpression(expr: Expression): NamedExpression = expr match {
+      case named: NamedExpression => named
+      case expr => UnresolvedAlias(expr)
+    }
+
+    val groupingExprs = rel.getGroupingExpressionsList.asScala.toSeq.map(transformExpression)
+    val aggExprs = rel.getAggregateExpressionsList.asScala.toSeq.map(transformExpression)
+    val aliasedAgg = (groupingExprs ++ aggExprs).map(toNamedExpression)
+
+    rel.getGroupType match {
+      case proto.Aggregate.GroupType.GROUP_TYPE_GROUPBY =>
+        logical.Aggregate(
+          groupingExpressions = groupingExprs,
+          aggregateExpressions = aliasedAgg,
+          child = input)
+
+      case proto.Aggregate.GroupType.GROUP_TYPE_ROLLUP =>
+        logical.Aggregate(
+          groupingExpressions = Seq(Rollup(groupingExprs.map(Seq(_)))),
+          aggregateExpressions = aliasedAgg,
+          child = input)
+
+      case proto.Aggregate.GroupType.GROUP_TYPE_CUBE =>
+        logical.Aggregate(
+          groupingExpressions = Seq(Cube(groupingExprs.map(Seq(_)))),
+          aggregateExpressions = aliasedAgg,
+          child = input)
+
+      case proto.Aggregate.GroupType.GROUP_TYPE_PIVOT =>
+        if (!rel.hasPivot) {
+          throw InvalidPlanInput("Aggregate with GROUP_TYPE_PIVOT requires a Pivot")
         }
 
-    // Retain group columns in aggregate expressions:
-    val aggExprs =
-      groupingExprs ++ rel.getResultExpressionsList.asScala.map(transformResultExpression)
+        val pivotExpr = transformExpression(rel.getPivot.getCol)
 
-    logical.Aggregate(
-      child = transformRelation(rel.getInput),
-      groupingExpressions = groupingExprs.toSeq,
-      aggregateExpressions = aggExprs.toSeq)
-  }
+        var valueExprs = rel.getPivot.getValuesList.asScala.toSeq.map(transformLiteral)
+        if (valueExprs.isEmpty) {
+          // This is to prevent unintended OOM errors when the number of distinct values is large
+          val maxValues = session.sessionState.conf.dataFramePivotMaxValues
+          // Get the distinct values of the column and sort them so its consistent
+          val pivotCol = Column(pivotExpr)
+          valueExprs = Dataset
+            .ofRows(session, input)
+            .select(pivotCol)
+            .distinct()
+            .limit(maxValues + 1)
+            .sort(pivotCol) // ensure that the output columns are in a consistent logical order
+            .collect()
+            .map(_.get(0))
+            .toSeq
+            .map(expressions.Literal.apply)
+        }
 
-  private def transformResultExpression(exp: proto.Expression): expressions.NamedExpression = {
-    if (exp.hasAlias) {
-      transformAlias(exp.getAlias)
-    } else {
-      UnresolvedAlias(transformExpression(exp))
+        logical.Pivot(
+          groupByExprsOpt = Some(groupingExprs.map(toNamedExpression)),
+          pivotColumn = pivotExpr,
+          pivotValues = valueExprs,
+          aggregates = aggExprs,
+          child = input)
+
+      case other => throw InvalidPlanInput(s"Unknown Group Type $other")
     }
   }
 
