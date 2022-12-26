@@ -108,6 +108,38 @@ class SparkConnectTests(SparkConnectSQLTestCase):
             df4.filter(df4.name.isNotNull()).toPandas(),
         )
 
+    def test_invalid_ops(self):
+        query = """
+            SELECT * FROM VALUES
+            (1, 1, 0, NULL), (2, NULL, 1, 2.0), (3, 3, 4, 3.5)
+            AS tab(a, b, c, d)
+            """
+        cdf = self.connect.sql(query)
+
+        with self.assertRaisesRegex(
+            ValueError,
+            "Cannot apply 'in' operator against a column",
+        ):
+            1 in cdf.a
+
+        with self.assertRaisesRegex(
+            ValueError,
+            "Cannot convert column into bool",
+        ):
+            cdf.a > 2 and cdf.b < 1
+
+        with self.assertRaisesRegex(
+            ValueError,
+            "Cannot convert column into bool",
+        ):
+            cdf.a > 2 or cdf.b < 1
+
+        with self.assertRaisesRegex(
+            ValueError,
+            "Cannot convert column into bool",
+        ):
+            not (cdf.a > 2)
+
     def test_datetime(self):
         query = """
             SELECT * FROM VALUES
@@ -167,6 +199,45 @@ class SparkConnectTests(SparkConnectSQLTestCase):
         self.assert_eq(
             cdf.select(cdf.b < datetime.datetime(2022, 12, 23, 17, 0, 0)).toPandas(),
             sdf.select(sdf.b < datetime.datetime(2022, 12, 23, 17, 0, 0)).toPandas(),
+        )
+
+    def test_decimal(self):
+        # SPARK-41701: test decimal
+        query = """
+            SELECT * FROM VALUES
+            (1, 1, 0, NULL), (2, NULL, 1, 2.0), (3, 3, 4, 3.5)
+            AS tab(a, b, c, d)
+            """
+        # +---+----+---+----+
+        # |  a|   b|  c|   d|
+        # +---+----+---+----+
+        # |  1|   1|  0|null|
+        # |  2|null|  1| 2.0|
+        # |  3|   3|  4| 3.5|
+        # +---+----+---+----+
+
+        cdf = self.spark.sql(query)
+        sdf = self.connect.sql(query)
+
+        self.assert_eq(
+            cdf.select(cdf.a < decimal.Decimal(3)).toPandas(),
+            sdf.select(sdf.a < decimal.Decimal(3)).toPandas(),
+        )
+        self.assert_eq(
+            cdf.select(cdf.a != decimal.Decimal(2)).toPandas(),
+            sdf.select(sdf.a != decimal.Decimal(2)).toPandas(),
+        )
+        self.assert_eq(
+            cdf.select(cdf.a == decimal.Decimal(2)).toPandas(),
+            sdf.select(sdf.a == decimal.Decimal(2)).toPandas(),
+        )
+        self.assert_eq(
+            cdf.select(cdf.b < decimal.Decimal(2.5)).toPandas(),
+            sdf.select(sdf.b < decimal.Decimal(2.5)).toPandas(),
+        )
+        self.assert_eq(
+            cdf.select(cdf.d >= decimal.Decimal(3.0)).toPandas(),
+            sdf.select(sdf.d >= decimal.Decimal(3.0)).toPandas(),
         )
 
     def test_simple_binary_expressions(self):

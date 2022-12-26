@@ -16,6 +16,7 @@
 #
 
 import datetime
+import decimal
 
 from typing import (
     TYPE_CHECKING,
@@ -61,7 +62,9 @@ def _bin_op(
     def wrapped(self: "Column", other: Any) -> "Column":
         from pyspark.sql.connect.functions import lit
 
-        if isinstance(other, (bool, float, int, str, datetime.datetime, datetime.date)):
+        if isinstance(
+            other, (bool, float, int, str, datetime.datetime, datetime.date, decimal.Decimal)
+        ):
             other = lit(other)
         if not reverse:
             return scalar_function(name, self, other)
@@ -125,6 +128,13 @@ class Column:
     __invert__ = _func_op("not")
     __rand__ = _bin_op("and")
     __ror__ = _bin_op("or")
+
+    # container operators
+    def __contains__(self, item: Any) -> None:
+        raise ValueError(
+            "Cannot apply 'in' operator against a column: please use 'contains' "
+            "in a string column or 'array_contains' function for an array column."
+        )
 
     # bitwise operators
     bitwiseOR = _bin_op("bitwiseOR", PySparkColumn.bitwiseOR.__doc__)
@@ -202,9 +212,6 @@ class Column:
         ...
 
     def substr(self, startPos: Union[int, "Column"], length: Union[int, "Column"]) -> "Column":
-        from pyspark.sql.connect.function_builder import functions as F
-        from pyspark.sql.connect.functions import lit
-
         if type(startPos) != type(length):
             raise TypeError(
                 "startPos and length must be the same type. "
@@ -214,19 +221,21 @@ class Column:
                 )
             )
 
-        if isinstance(length, int):
-            length_exp = lit(length)
-        elif isinstance(length, Column):
-            length_exp = length
+        if isinstance(length, Column):
+            length_expr = length._expr
+        elif isinstance(length, int):
+            length_expr = LiteralExpression._from_value(length)
         else:
             raise TypeError("Unsupported type for substr().")
 
-        if isinstance(startPos, int):
-            start_exp = lit(startPos)
+        if isinstance(startPos, Column):
+            start_expr = startPos._expr
+        elif isinstance(startPos, int):
+            start_expr = LiteralExpression._from_value(startPos)
         else:
-            start_exp = startPos
+            raise TypeError("Unsupported type for substr().")
 
-        return F.substr(self, start_exp, length_exp)
+        return Column(UnresolvedFunction("substring", [self._expr, start_expr, length_expr]))
 
     substr.__doc__ = PySparkColumn.substr.__doc__
 
@@ -236,7 +245,9 @@ class Column:
         """
         from pyspark.sql.connect.functions import lit
 
-        if isinstance(other, (bool, float, int, str, datetime.datetime, datetime.date)):
+        if isinstance(
+            other, (bool, float, int, str, datetime.datetime, datetime.date, decimal.Decimal)
+        ):
             other = lit(other)
         return scalar_function("==", self, other)
 
@@ -355,6 +366,14 @@ class Column:
 
     def __iter__(self) -> None:
         raise TypeError("Column is not iterable")
+
+    def __nonzero__(self) -> None:
+        raise ValueError(
+            "Cannot convert column into bool: please use '&' for 'and', '|' for 'or', "
+            "'~' for 'not' when building DataFrame boolean expressions."
+        )
+
+    __bool__ = __nonzero__
 
 
 Column.__doc__ = PySparkColumn.__doc__
