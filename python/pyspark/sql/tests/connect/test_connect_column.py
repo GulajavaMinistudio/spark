@@ -97,6 +97,10 @@ class SparkConnectTests(SparkConnectSQLTestCase):
             df.select(df.name.substr(0, 1).alias("col")).toPandas(),
             df2.select(df2.name.substr(0, 1).alias("col")).toPandas(),
         )
+        self.assert_eq(
+            df.select(df.name.substr(0, 1).name("col")).toPandas(),
+            df2.select(df2.name.substr(0, 1).name("col")).toPandas(),
+        )
         df3 = self.connect.sql("SELECT cast(null as int) as name")
         df4 = self.spark.sql("SELECT cast(null as int) as name")
         self.assert_eq(
@@ -536,6 +540,46 @@ class SparkConnectTests(SparkConnectSQLTestCase):
             sdf.select(
                 sdf.b.between(datetime.date(2022, 12, 23), datetime.date(2022, 12, 24))
             ).toPandas(),
+        )
+
+    def test_column_bitwise_ops(self):
+        # SPARK-41751: test bitwiseAND, bitwiseOR, bitwiseXOR
+        from pyspark.sql import functions as SF
+        from pyspark.sql.connect import functions as CF
+
+        query = """
+            SELECT * FROM VALUES
+            (1, 1, 0), (2, NULL, 1), (3, 3, 4)
+            AS tab(a, b, c)
+            """
+
+        # +---+----+---+
+        # |  a|   b|  c|
+        # +---+----+---+
+        # |  1|   1|  0|
+        # |  2|null|  1|
+        # |  3|   3|  4|
+        # +---+----+---+
+
+        cdf = self.connect.sql(query)
+        sdf = self.spark.sql(query)
+
+        # test bitwiseAND
+        self.assert_eq(
+            cdf.select(cdf.a.bitwiseAND(cdf.b), cdf["a"].bitwiseAND(CF.col("c"))).toPandas(),
+            sdf.select(sdf.a.bitwiseAND(sdf.b), sdf["a"].bitwiseAND(SF.col("c"))).toPandas(),
+        )
+
+        # test bitwiseOR
+        self.assert_eq(
+            cdf.select(cdf.a.bitwiseOR(cdf.b), cdf["a"].bitwiseOR(CF.col("c"))).toPandas(),
+            sdf.select(sdf.a.bitwiseOR(sdf.b), sdf["a"].bitwiseOR(SF.col("c"))).toPandas(),
+        )
+
+        # test bitwiseXOR
+        self.assert_eq(
+            cdf.select(cdf.a.bitwiseXOR(cdf.b), cdf["a"].bitwiseXOR(CF.col("c"))).toPandas(),
+            sdf.select(sdf.a.bitwiseXOR(sdf.b), sdf["a"].bitwiseXOR(SF.col("c"))).toPandas(),
         )
 
     def test_column_accessor(self):
