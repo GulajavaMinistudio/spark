@@ -89,6 +89,7 @@ class SparkConnectPlanner(session: SparkSession) {
       case proto.Relation.RelTypeCase.SUMMARY => transformStatSummary(rel.getSummary)
       case proto.Relation.RelTypeCase.DESCRIBE => transformStatDescribe(rel.getDescribe)
       case proto.Relation.RelTypeCase.COV => transformStatCov(rel.getCov)
+      case proto.Relation.RelTypeCase.CORR => transformStatCorr(rel.getCorr)
       case proto.Relation.RelTypeCase.CROSSTAB =>
         transformStatCrosstab(rel.getCrosstab)
       case proto.Relation.RelTypeCase.TO_SCHEMA => transformToSchema(rel.getToSchema)
@@ -352,6 +353,19 @@ class SparkConnectPlanner(session: SparkSession) {
       data = Tuple1.apply(cov) :: Nil)
   }
 
+  private def transformStatCorr(rel: proto.StatCorr): LogicalPlan = {
+    val df = Dataset.ofRows(session, transformRelation(rel.getInput))
+    val corr = if (rel.hasMethod) {
+      df.stat.corr(rel.getCol1, rel.getCol2, rel.getMethod)
+    } else {
+      df.stat.corr(rel.getCol1, rel.getCol2)
+    }
+
+    LocalRelation.fromProduct(
+      output = AttributeReference("corr", DoubleType, false)() :: Nil,
+      data = Tuple1.apply(corr) :: Nil)
+  }
+
   private def transformStatCrosstab(rel: proto.StatCrosstab): LogicalPlan = {
     Dataset
       .ofRows(session, transformRelation(rel.getInput))
@@ -596,6 +610,8 @@ class SparkConnectPlanner(session: SparkSession) {
         transformUnresolvedRegex(exp.getUnresolvedRegex)
       case proto.Expression.ExprTypeCase.UNRESOLVED_EXTRACT_VALUE =>
         transformUnresolvedExtractValue(exp.getUnresolvedExtractValue)
+      case proto.Expression.ExprTypeCase.UPDATE_FIELDS =>
+        transformUpdateFields(exp.getUpdateFields)
       case proto.Expression.ExprTypeCase.SORT_ORDER => transformSortOrder(exp.getSortOrder)
       case proto.Expression.ExprTypeCase.LAMBDA_FUNCTION =>
         transformLambdaFunction(exp.getLambdaFunction)
@@ -858,6 +874,21 @@ class SparkConnectPlanner(session: SparkSession) {
     UnresolvedExtractValue(
       transformExpression(extract.getChild),
       transformExpression(extract.getExtraction))
+  }
+
+  private def transformUpdateFields(update: proto.Expression.UpdateFields): UpdateFields = {
+    if (update.hasValueExpression) {
+      // add or replace a field
+      UpdateFields.apply(
+        col = transformExpression(update.getStructExpression),
+        fieldName = update.getFieldName,
+        expr = transformExpression(update.getValueExpression))
+    } else {
+      // drop a field
+      UpdateFields.apply(
+        col = transformExpression(update.getStructExpression),
+        fieldName = update.getFieldName)
+    }
   }
 
   private def transformWindowExpression(window: proto.Expression.Window) = {
