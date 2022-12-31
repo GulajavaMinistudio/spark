@@ -558,14 +558,14 @@ class Sample(LogicalPlan):
         upper_bound: float,
         with_replacement: bool,
         seed: Optional[int],
-        force_stable_sort: bool = False,
+        deterministic_order: bool = False,
     ) -> None:
         super().__init__(child)
         self.lower_bound = lower_bound
         self.upper_bound = upper_bound
         self.with_replacement = with_replacement
         self.seed = seed
-        self.force_stable_sort = force_stable_sort
+        self.deterministic_order = deterministic_order
 
     def plan(self, session: "SparkConnectClient") -> proto.Relation:
         assert self._child is not None
@@ -576,7 +576,7 @@ class Sample(LogicalPlan):
         plan.sample.with_replacement = self.with_replacement
         if self.seed is not None:
             plan.sample.seed = self.seed
-        plan.sample.force_stable_sort = self.force_stable_sort
+        plan.sample.deterministic_order = self.deterministic_order
         return plan
 
 
@@ -1076,6 +1076,30 @@ class StatCov(LogicalPlan):
         plan.cov.input.CopyFrom(self._child.plan(session))
         plan.cov.col1 = self._col1
         plan.cov.col2 = self._col2
+        return plan
+
+
+class StatApproxQuantile(LogicalPlan):
+    def __init__(
+        self,
+        child: Optional["LogicalPlan"],
+        cols: List[str],
+        probabilities: List[float],
+        relativeError: float,
+    ) -> None:
+        super().__init__(child)
+        self._cols = cols
+        self._probabilities = probabilities
+        self._relativeError = relativeError
+
+    def plan(self, session: "SparkConnectClient") -> proto.Relation:
+        assert self._child is not None
+
+        plan = proto.Relation()
+        plan.approx_quantile.input.CopyFrom(self._child.plan(session))
+        plan.approx_quantile.cols.extend(self._cols)
+        plan.approx_quantile.probabilities.extend(self._probabilities)
+        plan.approx_quantile.relative_error = self._relativeError
         return plan
 
 
