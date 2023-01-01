@@ -117,7 +117,7 @@ class SparkConnectSQLTestCase(PandasOnSparkTestCase, ReusedPySparkTestCase, SQLT
         cls.spark.sql("DROP TABLE IF EXISTS {}".format(cls.tbl_name_empty))
 
 
-class SparkConnectTests(SparkConnectSQLTestCase):
+class SparkConnectBasicTests(SparkConnectSQLTestCase):
     def test_df_get_item(self):
         # SPARK-41779: test __getitem__
 
@@ -1175,6 +1175,25 @@ class SparkConnectTests(SparkConnectSQLTestCase):
                 ["col1", "col3"], [0.1, 0.5, 0.9], -0.1
             )
 
+    def test_stat_freq_items(self):
+        # SPARK-41065: Test the stat.freqItems method
+        self.assert_eq(
+            self.connect.read.table(self.tbl_name2).stat.freqItems(["col1", "col3"]).toPandas(),
+            self.spark.read.table(self.tbl_name2).stat.freqItems(["col1", "col3"]).toPandas(),
+        )
+
+        self.assert_eq(
+            self.connect.read.table(self.tbl_name2)
+            .stat.freqItems(["col1", "col3"], 0.4)
+            .toPandas(),
+            self.spark.read.table(self.tbl_name2).stat.freqItems(["col1", "col3"], 0.4).toPandas(),
+        )
+
+        with self.assertRaisesRegex(
+            TypeError, "cols must be a list or tuple of column names as strings"
+        ):
+            self.connect.read.table(self.tbl_name2).stat.freqItems("col1")
+
     def test_repr(self):
         # SPARK-41213: Test the __repr__ method
         query = """SELECT * FROM VALUES (1L, NULL), (3L, "Z") AS tab(a, b)"""
@@ -1726,6 +1745,28 @@ class SparkConnectTests(SparkConnectSQLTestCase):
             "Numeric aggregation function can only be applied on numeric columns",
         ):
             cdf.groupBy("name").pivot("department").sum("salary", "department").show()
+
+    def test_unsupported_functions(self):
+        # SPARK-41225: Disable unsupported functions.
+        df = self.connect.read.table(self.tbl_name)
+        for f in (
+            "rdd",
+            "unpersist",
+            "cache",
+            "persist",
+            "withWatermark",
+            "observe",
+            "foreach",
+            "foreachPartition",
+            "toLocalIterator",
+            "checkpoint",
+            "localCheckpoint",
+            "_repr_html_",
+            "semanticHash",
+            "sameSemantics",
+        ):
+            with self.assertRaises(NotImplementedError):
+                getattr(df, f)()
 
 
 @unittest.skipIf(not should_test_connect, connect_requirement_message)
