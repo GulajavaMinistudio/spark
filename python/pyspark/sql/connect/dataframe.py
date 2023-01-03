@@ -35,7 +35,7 @@ import pandas
 import warnings
 from collections.abc import Iterable
 
-from pyspark import _NoValue
+from pyspark import _NoValue, SparkContext, SparkConf
 from pyspark._globals import _NoValueType
 from pyspark.sql.types import DataType, StructType, Row
 
@@ -952,6 +952,26 @@ class DataFrame:
 
     freqItems.__doc__ = PySparkDataFrame.freqItems.__doc__
 
+    def sampleBy(
+        self, col: "ColumnOrName", fractions: Dict[Any, float], seed: Optional[int] = None
+    ) -> "DataFrame":
+        if not isinstance(col, (Column, str)):
+            raise TypeError("col must be a string or a column, but got %r" % type(col))
+        if not isinstance(fractions, dict):
+            raise TypeError("fractions must be a dict but got %r" % type(fractions))
+        for k, v in fractions.items():
+            if not isinstance(k, (float, int, str)):
+                raise TypeError("key must be float, int, or string, but got %r" % type(k))
+            fractions[k] = float(v)
+        seed = seed if seed is not None else random.randint(0, sys.maxsize)
+
+        return DataFrame.withPlan(
+            plan.StatSampleBy(child=self._plan, col=col, fractions=fractions, seed=seed),
+            session=self._session,
+        )
+
+    sampleBy.__doc__ = PySparkDataFrame.sampleBy.__doc__
+
     def _get_alias(self) -> Optional[str]:
         p = self._plan
         while p is not None:
@@ -1344,5 +1364,109 @@ class DataFrameStatFunctions:
 
     freqItems.__doc__ = DataFrame.freqItems.__doc__
 
+    def sampleBy(
+        self, col: str, fractions: Dict[Any, float], seed: Optional[int] = None
+    ) -> DataFrame:
+        return self.df.sampleBy(col, fractions, seed)
+
+    sampleBy.__doc__ = DataFrame.sampleBy.__doc__
+
 
 DataFrameStatFunctions.__doc__ = PySparkDataFrameStatFunctions.__doc__
+
+
+def _test() -> None:
+    import os
+    import sys
+    import doctest
+    from pyspark.sql import SparkSession as PySparkSession
+    from pyspark.testing.connectutils import should_test_connect, connect_requirement_message
+
+    os.chdir(os.environ["SPARK_HOME"])
+
+    if should_test_connect:
+        import pyspark.sql.connect.dataframe
+
+        globs = pyspark.sql.connect.dataframe.__dict__.copy()
+        # Works around to create a regular Spark session
+        sc = SparkContext("local[4]", "sql.connect.dataframe tests", conf=SparkConf())
+        globs["_spark"] = PySparkSession(
+            sc, options={"spark.app.name": "sql.connect.dataframe tests"}
+        )
+
+        # TODO(SPARK-41819): Implement RDD.getNumPartitions
+        del pyspark.sql.connect.dataframe.DataFrame.coalesce.__doc__
+        del pyspark.sql.connect.dataframe.DataFrame.repartition.__doc__
+
+        # TODO(SPARK-41820): Fix SparkConnectException: requirement failed
+        del pyspark.sql.connect.dataframe.DataFrame.createOrReplaceGlobalTempView.__doc__
+        del pyspark.sql.connect.dataframe.DataFrame.createOrReplaceTempView.__doc__
+
+        # TODO(SPARK-41821): Fix DataFrame.describe
+        del pyspark.sql.connect.dataframe.DataFrame.describe.__doc__
+
+        # TODO(SPARK-41823): ambiguous column names
+        del pyspark.sql.connect.dataframe.DataFrame.drop.__doc__
+        del pyspark.sql.connect.dataframe.DataFrame.join.__doc__
+
+        # TODO(SPARK-41824): DataFrame.explain format is different
+        del pyspark.sql.connect.dataframe.DataFrame.explain.__doc__
+        del pyspark.sql.connect.dataframe.DataFrame.hint.__doc__
+
+        # TODO(SPARK-41825): Dataframe.show formatting int as double
+        del pyspark.sql.connect.dataframe.DataFrame.fillna.__doc__
+        del pyspark.sql.connect.dataframe.DataFrameNaFunctions.replace.__doc__
+        del pyspark.sql.connect.dataframe.DataFrameNaFunctions.fill.__doc__
+        del pyspark.sql.connect.dataframe.DataFrame.replace.__doc__
+        del pyspark.sql.connect.dataframe.DataFrame.intersect.__doc__
+
+        # TODO(SPARK-41826): Implement Dataframe.readStream
+        del pyspark.sql.connect.dataframe.DataFrame.isStreaming.__doc__
+
+        # TODO(SPARK-41827): groupBy requires all cols be Column or str
+        del pyspark.sql.connect.dataframe.DataFrame.groupBy.__doc__
+
+        # TODO(SPARK-41828): Implement creating empty DataFrame
+        del pyspark.sql.connect.dataframe.DataFrame.isEmpty.__doc__
+
+        # TODO(SPARK-41829): Add Dataframe sort ordering
+        del pyspark.sql.connect.dataframe.DataFrame.sort.__doc__
+        del pyspark.sql.connect.dataframe.DataFrame.sortWithinPartitions.__doc__
+
+        # TODO(SPARK-41830): fix sample parameters
+        del pyspark.sql.connect.dataframe.DataFrame.sample.__doc__
+
+        # TODO(SPARK-41831): fix transform to accept ColumnReference
+        del pyspark.sql.connect.dataframe.DataFrame.transform.__doc__
+
+        # TODO(SPARK-41832): fix unionByName
+        del pyspark.sql.connect.dataframe.DataFrame.unionByName.__doc__
+
+        # TODO(SPARK-41818): Support saveAsTable
+        del pyspark.sql.connect.dataframe.DataFrame.write.__doc__
+
+        # Creates a remote Spark session.
+        os.environ["SPARK_REMOTE"] = "sc://localhost"
+        globs["spark"] = PySparkSession.builder.remote("sc://localhost").getOrCreate()
+
+        (failure_count, test_count) = doctest.testmod(
+            pyspark.sql.connect.dataframe,
+            globs=globs,
+            optionflags=doctest.ELLIPSIS
+            | doctest.NORMALIZE_WHITESPACE
+            | doctest.IGNORE_EXCEPTION_DETAIL,
+        )
+
+        globs["spark"].stop()
+        globs["_spark"].stop()
+        if failure_count:
+            sys.exit(-1)
+    else:
+        print(
+            f"Skipping pyspark.sql.connect.dataframe doctests: {connect_requirement_message}",
+            file=sys.stderr,
+        )
+
+
+if __name__ == "__main__":
+    _test()

@@ -28,6 +28,7 @@ from typing import (
     Tuple,
     Callable,
     ValuesView,
+    cast,
 )
 
 from pyspark.sql.connect.column import Column
@@ -41,6 +42,7 @@ from pyspark.sql.connect.expressions import (
     LambdaFunction,
 )
 from pyspark.sql import functions as pysparkfuncs
+from pyspark.sql.types import DataType, StructType, ArrayType
 
 if TYPE_CHECKING:
     from pyspark.sql.connect._typing import ColumnOrName
@@ -547,8 +549,13 @@ def hypot(col1: Union["ColumnOrName", float], col2: Union["ColumnOrName", float]
 hypot.__doc__ = pysparkfuncs.hypot.__doc__
 
 
-def log(col: "ColumnOrName") -> Column:
-    return _invoke_function_over_columns("ln", col)
+def log(arg1: Union["ColumnOrName", float], arg2: Optional["ColumnOrName"] = None) -> Column:
+    if arg2 is None:
+        # in this case, arg1 should be "ColumnOrName"
+        return _invoke_function("ln", _to_col(cast("ColumnOrName", arg1)))
+    else:
+        # in this case, arg1 should be a float
+        return _invoke_function("log", lit(cast(float, arg1)), _to_col(arg2))
 
 
 log.__doc__ = pysparkfuncs.log.__doc__
@@ -1292,19 +1299,26 @@ def from_csv(
 from_csv.__doc__ = pysparkfuncs.from_csv.__doc__
 
 
-# TODO: 1, support ArrayType and StructType schema; 2, support options
 def from_json(
     col: "ColumnOrName",
-    schema: Union[Column, str],
+    schema: Union[ArrayType, StructType, Column, str],
+    options: Optional[Dict[str, str]] = None,
 ) -> Column:
     if isinstance(schema, Column):
         _schema = schema
+    elif isinstance(schema, DataType):
+        _schema = lit(schema.json())
     elif isinstance(schema, str):
         _schema = lit(schema)
     else:
-        raise TypeError(f"schema should be a Column or str, but got {type(schema).__name__}")
+        raise TypeError(
+            f"schema should be a Column or str or DataType, but got {type(schema).__name__}"
+        )
 
-    return _invoke_function("from_json", _to_col(col), _schema)
+    if options is None:
+        return _invoke_function("from_json", _to_col(col), _schema)
+    else:
+        return _invoke_function("from_json", _to_col(col), _schema, _options_to_col(options))
 
 
 from_json.__doc__ = pysparkfuncs.from_json.__doc__
@@ -1468,8 +1482,7 @@ def schema_of_csv(csv: "ColumnOrName", options: Optional[Dict[str, str]] = None)
 schema_of_csv.__doc__ = pysparkfuncs.schema_of_csv.__doc__
 
 
-# TODO(SPARK-41494): Support options
-def schema_of_json(json: "ColumnOrName") -> Column:
+def schema_of_json(json: "ColumnOrName", options: Optional[Dict[str, str]] = None) -> Column:
     if isinstance(json, Column):
         _json = json
     elif isinstance(json, str):
@@ -1477,7 +1490,10 @@ def schema_of_json(json: "ColumnOrName") -> Column:
     else:
         raise TypeError(f"json should be a Column or str, but got {type(json).__name__}")
 
-    return _invoke_function("schema_of_json", _json)
+    if options is None:
+        return _invoke_function("schema_of_json", _json)
+    else:
+        return _invoke_function("schema_of_json", _json, _options_to_col(options))
 
 
 schema_of_json.__doc__ = pysparkfuncs.schema_of_json.__doc__
@@ -1548,8 +1564,11 @@ def to_csv(col: "ColumnOrName", options: Optional[Dict[str, str]] = None) -> Col
 to_csv.__doc__ = pysparkfuncs.to_csv.__doc__
 
 
-def to_json(col: "ColumnOrName") -> Column:
-    return _invoke_function("to_json", _to_col(col))
+def to_json(col: "ColumnOrName", options: Optional[Dict[str, str]] = None) -> Column:
+    if options is None:
+        return _invoke_function("to_json", _to_col(col))
+    else:
+        return _invoke_function("to_json", _to_col(col), _options_to_col(options))
 
 
 to_json.__doc__ = pysparkfuncs.to_json.__doc__
