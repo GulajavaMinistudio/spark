@@ -232,6 +232,16 @@ class SparkConnectBasicTests(SparkConnectSQLTestCase):
                 self.connect.read.parquet(d).toPandas(), self.spark.read.parquet(d).toPandas()
             )
 
+    def test_text(self):
+        # SPARK-41849: Implement DataFrameReader.text
+        with tempfile.TemporaryDirectory() as d:
+            # Write a DataFrame into a text file
+            self.spark.createDataFrame(
+                [{"name": "Sandeep Singh"}, {"name": "Hyukjin Kwon"}]
+            ).write.mode("overwrite").format("text").save(d)
+            # Read the text file as a DataFrame.
+            self.assert_eq(self.connect.read.text(d).toPandas(), self.spark.read.text(d).toPandas())
+
     def test_join_condition_column_list_columns(self):
         left_connect_df = self.connect.read.table(self.tbl_name)
         right_connect_df = self.connect.read.table(self.tbl_name2)
@@ -1193,13 +1203,26 @@ class SparkConnectBasicTests(SparkConnectSQLTestCase):
             self.spark.read.table(self.tbl_name).hint("illegal").toPandas(),
         )
 
+        # Hint with all supported parameter values
+        such_a_nice_list = ["itworks1", "itworks2", "itworks3"]
+        self.assert_eq(
+            self.connect.read.table(self.tbl_name).hint("my awesome hint", 1.2345, 2).toPandas(),
+            self.spark.read.table(self.tbl_name).hint("my awesome hint", 1.2345, 2).toPandas(),
+        )
+
         # Hint with unsupported parameter values
         with self.assertRaises(SparkConnectException):
             self.connect.read.table(self.tbl_name).hint("REPARTITION", "id+1").toPandas()
 
         # Hint with unsupported parameter types
         with self.assertRaises(TypeError):
-            self.connect.read.table(self.tbl_name).hint("REPARTITION", 1.1).toPandas()
+            self.connect.read.table(self.tbl_name).hint("REPARTITION", range(5)).toPandas()
+
+        # Hint with unsupported parameter types
+        with self.assertRaises(TypeError):
+            self.connect.read.table(self.tbl_name).hint(
+                "my awesome hint", 1.2345, 2, such_a_nice_list, range(6)
+            ).toPandas()
 
         # Hint with wrong combination
         with self.assertRaises(SparkConnectException):
@@ -1235,6 +1258,21 @@ class SparkConnectBasicTests(SparkConnectSQLTestCase):
         # +---+---+
         expected = "+---+---+\n|  X|  Y|\n+---+---+\n|  1|  2|\n+---+---+\n"
         self.assertEqual(show_str, expected)
+
+    def test_describe(self):
+        # SPARK-41403: Test the describe method
+        self.assert_eq(
+            self.connect.read.table(self.tbl_name).describe("id").toPandas(),
+            self.spark.read.table(self.tbl_name).describe("id").toPandas(),
+        )
+        self.assert_eq(
+            self.connect.read.table(self.tbl_name).describe("id", "name").toPandas(),
+            self.spark.read.table(self.tbl_name).describe("id", "name").toPandas(),
+        )
+        self.assert_eq(
+            self.connect.read.table(self.tbl_name).describe(["id", "name"]).toPandas(),
+            self.spark.read.table(self.tbl_name).describe(["id", "name"]).toPandas(),
+        )
 
     def test_stat_cov(self):
         # SPARK-41067: Test the stat.cov method

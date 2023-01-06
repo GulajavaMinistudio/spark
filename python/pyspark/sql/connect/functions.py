@@ -1517,21 +1517,21 @@ size.__doc__ = pysparkfuncs.size.__doc__
 def slice(
     col: "ColumnOrName", start: Union["ColumnOrName", int], length: Union["ColumnOrName", int]
 ) -> Column:
-    if isinstance(start, Column):
+    if isinstance(start, (Column, str)):
         _start = start
     elif isinstance(start, int):
         _start = lit(start)
     else:
-        raise TypeError(f"start should be a Column or int, but got {type(start).__name__}")
+        raise TypeError(f"start should be a Column, str or int, but got {type(start).__name__}")
 
-    if isinstance(length, Column):
+    if isinstance(length, (Column, str)):
         _length = length
     elif isinstance(length, int):
         _length = lit(length)
     else:
-        raise TypeError(f"start should be a Column or int, but got {type(length).__name__}")
+        raise TypeError(f"start should be a Column, str or int, but got {type(length).__name__}")
 
-    return _invoke_function("slice", _to_col(col), _start, _length)
+    return _invoke_function_over_columns("slice", col, _start, _length)
 
 
 slice.__doc__ = pysparkfuncs.slice.__doc__
@@ -2368,13 +2368,6 @@ def _test() -> None:
         # TODO(SPARK-41757): Fix String representation for Column class
         del pyspark.sql.connect.functions.col.__doc__
 
-        # TODO(SPARK-41842): support data type: Timestamp(NANOSECOND, null)
-        del pyspark.sql.connect.functions.hour.__doc__
-        del pyspark.sql.connect.functions.minute.__doc__
-        del pyspark.sql.connect.functions.second.__doc__
-        del pyspark.sql.connect.functions.window.__doc__
-        del pyspark.sql.connect.functions.window_time.__doc__
-
         # TODO(SPARK-41838): fix dataset.show
         del pyspark.sql.connect.functions.posexplode_outer.__doc__
         del pyspark.sql.connect.functions.explode_outer.__doc__
@@ -2390,7 +2383,6 @@ def _test() -> None:
         del pyspark.sql.connect.functions.transform_values.__doc__
 
         # TODO(SPARK-41812): Proper column names after join
-        del pyspark.sql.connect.functions.broadcast.__doc__
         del pyspark.sql.connect.functions.count_distinct.__doc__
 
         # TODO(SPARK-41843): Implement SparkSession.udf
@@ -2402,14 +2394,9 @@ def _test() -> None:
         # TODO(SPARK-41847): mapfield,structlist invalid type
         del pyspark.sql.connect.functions.element_at.__doc__
         del pyspark.sql.connect.functions.explode.__doc__
-        del pyspark.sql.connect.functions.inline.__doc__
-        del pyspark.sql.connect.functions.inline_outer.__doc__
         del pyspark.sql.connect.functions.map_filter.__doc__
         del pyspark.sql.connect.functions.map_zip_with.__doc__
         del pyspark.sql.connect.functions.posexplode.__doc__
-
-        # TODO(SPARK-41849): implement DataFrameReader.text
-        del pyspark.sql.connect.functions.input_file_name.__doc__
 
         # Creates a remote Spark session.
         os.environ["SPARK_REMOTE"] = "sc://localhost"
