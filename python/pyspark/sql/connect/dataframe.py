@@ -33,12 +33,14 @@ from typing import (
 import sys
 import random
 import pandas
+import datetime
+import json
 import warnings
 from collections.abc import Iterable
 
 from pyspark import _NoValue, SparkContext, SparkConf
 from pyspark._globals import _NoValueType
-from pyspark.sql.types import DataType, StructType, Row
+from pyspark.sql.types import StructType, Row
 
 import pyspark.sql.connect.plan as plan
 from pyspark.sql.connect.group import GroupedData
@@ -470,6 +472,21 @@ class DataFrame:
         )
 
     sample.__doc__ = PySparkDataFrame.sample.__doc__
+
+    def withMetadata(self, columnName: str, metadata: Dict[str, Any]) -> "DataFrame":
+        if not isinstance(metadata, dict):
+            raise TypeError("metadata should be a dict")
+
+        return DataFrame.withPlan(
+            plan.WithMetadata(
+                child=self._plan,
+                column=columnName,
+                metadata=json.dumps(metadata),
+            ),
+            session=self._session,
+        )
+
+    withMetadata.__doc__ = PySparkDataFrame.withMetadata.__doc__
 
     def withColumnRenamed(self, existing: str, new: str) -> "DataFrame":
         return self.withColumnsRenamed({existing: new})
@@ -1116,10 +1133,14 @@ class DataFrame:
 
         rows: List[Row] = []
         for row in table.to_pylist():
-            _dict = {}
+            _dict: Dict[Any, Any] = {}
             for k, v in row.items():
                 if isinstance(v, bytes):
                     _dict[k] = bytearray(v)
+                elif isinstance(v, datetime.datetime) and v.tzinfo is not None:
+                    # TODO: Should be controlled by "spark.sql.timestampType"
+                    # always remove the time zone for now
+                    _dict[k] = v.replace(tzinfo=None)
                 else:
                     _dict[k] = v
             rows.append(Row(**_dict))
@@ -1189,7 +1210,7 @@ class DataFrame:
 
     inputFiles.__doc__ = PySparkDataFrame.inputFiles.__doc__
 
-    def to(self, schema: DataType) -> "DataFrame":
+    def to(self, schema: StructType) -> "DataFrame":
         assert schema is not None
         return DataFrame.withPlan(
             plan.ToSchema(child=self._plan, schema=schema),
@@ -1364,6 +1385,9 @@ class DataFrame:
     def sameSemantics(self, *args: Any, **kwargs: Any) -> None:
         raise NotImplementedError("sameSemantics() is not implemented.")
 
+    def writeTo(self, *args: Any, **kwargs: Any) -> None:
+        raise NotImplementedError("writeTo() is not implemented.")
+
     # SparkConnect specific API
     def offset(self, n: int) -> "DataFrame":
         """Returns a new :class: `DataFrame` by skipping the first `n` rows.
@@ -1511,8 +1535,6 @@ def _test() -> None:
         del pyspark.sql.connect.dataframe.DataFrame.drop.__doc__
         del pyspark.sql.connect.dataframe.DataFrame.join.__doc__
 
-        # TODO(SPARK-41824): DataFrame.explain format is different
-        del pyspark.sql.connect.dataframe.DataFrame.explain.__doc__
         del pyspark.sql.connect.dataframe.DataFrame.hint.__doc__
 
         # TODO(SPARK-41886): The doctest output has different order

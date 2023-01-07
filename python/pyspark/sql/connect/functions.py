@@ -1127,6 +1127,13 @@ def array_intersect(col1: "ColumnOrName", col2: "ColumnOrName") -> Column:
 array_intersect.__doc__ = pysparkfuncs.array_intersect.__doc__
 
 
+def array_compact(col: "ColumnOrName") -> Column:
+    return _invoke_function_over_columns("array_compact", col)
+
+
+array_compact.__doc__ = pysparkfuncs.array_compact.__doc__
+
+
 def array_join(
     col: "ColumnOrName", delimiter: str, null_replacement: Optional[str] = None
 ) -> Column:
@@ -2326,6 +2333,14 @@ def unwrap_udt(col: "ColumnOrName") -> Column:
 unwrap_udt.__doc__ = pysparkfuncs.unwrap_udt.__doc__
 
 
+def udf(*args: Any, **kwargs: Any) -> None:
+    raise NotImplementedError("udf() is not implemented.")
+
+
+def pandas_udf(*args: Any, **kwargs: Any) -> None:
+    raise NotImplementedError("pandas_udf() is not implemented.")
+
+
 def _test() -> None:
     import os
     import sys
@@ -2353,12 +2368,6 @@ def _test() -> None:
         del pyspark.sql.connect.functions.create_map.__doc__
         del pyspark.sql.connect.functions.from_csv.__doc__
         del pyspark.sql.connect.functions.from_json.__doc__
-
-        # TODO(SPARK-41455): Resolve dtypes inconsistencies of date/timestamp functions
-        del pyspark.sql.connect.functions.to_timestamp.__doc__
-        del pyspark.sql.connect.functions.to_utc_timestamp.__doc__
-        del pyspark.sql.connect.functions.date_trunc.__doc__
-        del pyspark.sql.connect.functions.from_utc_timestamp.__doc__
 
         # TODO(SPARK-41834): implement Dataframe.conf
         del pyspark.sql.connect.functions.from_unixtime.__doc__
