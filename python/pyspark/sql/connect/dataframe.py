@@ -38,7 +38,7 @@ import json
 import warnings
 from collections.abc import Iterable
 
-from pyspark import _NoValue, SparkContext, SparkConf
+from pyspark import _NoValue
 from pyspark._globals import _NoValueType
 from pyspark.sql.types import StructType, Row
 
@@ -473,21 +473,6 @@ class DataFrame:
 
     sample.__doc__ = PySparkDataFrame.sample.__doc__
 
-    def withMetadata(self, columnName: str, metadata: Dict[str, Any]) -> "DataFrame":
-        if not isinstance(metadata, dict):
-            raise TypeError("metadata should be a dict")
-
-        return DataFrame.withPlan(
-            plan.WithMetadata(
-                child=self._plan,
-                column=columnName,
-                metadata=json.dumps(metadata),
-            ),
-            session=self._session,
-        )
-
-    withMetadata.__doc__ = PySparkDataFrame.withMetadata.__doc__
-
     def withColumnRenamed(self, existing: str, new: str) -> "DataFrame":
         return self.withColumnsRenamed({existing: new})
 
@@ -531,8 +516,18 @@ class DataFrame:
         if not isinstance(colsMap, dict):
             raise TypeError("colsMap must be dict of column name and column.")
 
+        names: List[str] = []
+        columns: List[Column] = []
+        for columnName, column in colsMap.items():
+            names.append(columnName)
+            columns.append(column)
+
         return DataFrame.withPlan(
-            plan.WithColumns(self._plan, colsMap),
+            plan.WithColumns(
+                self._plan,
+                columnNames=names,
+                columns=columns,
+            ),
             session=self._session,
         )
 
@@ -542,11 +537,31 @@ class DataFrame:
         if not isinstance(col, Column):
             raise TypeError("col should be Column")
         return DataFrame.withPlan(
-            plan.WithColumns(self._plan, {colName: col}),
+            plan.WithColumns(
+                self._plan,
+                columnNames=[colName],
+                columns=[col],
+            ),
             session=self._session,
         )
 
     withColumn.__doc__ = PySparkDataFrame.withColumn.__doc__
+
+    def withMetadata(self, columnName: str, metadata: Dict[str, Any]) -> "DataFrame":
+        if not isinstance(metadata, dict):
+            raise TypeError("metadata should be a dict")
+
+        return DataFrame.withPlan(
+            plan.WithColumns(
+                self._plan,
+                columnNames=[columnName],
+                columns=[self[columnName]],
+                metadata=[json.dumps(metadata)],
+            ),
+            session=self._session,
+        )
+
+    withMetadata.__doc__ = PySparkDataFrame.withMetadata.__doc__
 
     def unpivot(
         self,
@@ -1517,12 +1532,6 @@ def _test() -> None:
         import pyspark.sql.connect.dataframe
 
         globs = pyspark.sql.connect.dataframe.__dict__.copy()
-        # Works around to create a regular Spark session
-        sc = SparkContext("local[4]", "sql.connect.dataframe tests", conf=SparkConf())
-        globs["_spark"] = PySparkSession(
-            sc, options={"spark.app.name": "sql.connect.dataframe tests"}
-        )
-
         # Spark Connect does not support RDD but the tests depend on them.
         del pyspark.sql.connect.dataframe.DataFrame.coalesce.__doc__
         del pyspark.sql.connect.dataframe.DataFrame.repartition.__doc__
@@ -1549,9 +1558,11 @@ def _test() -> None:
         # TODO(SPARK-41818): Support saveAsTable
         del pyspark.sql.connect.dataframe.DataFrame.write.__doc__
 
-        # Creates a remote Spark session.
-        os.environ["SPARK_REMOTE"] = "sc://localhost"
-        globs["spark"] = PySparkSession.builder.remote("sc://localhost").getOrCreate()
+        globs["spark"] = (
+            PySparkSession.builder.appName("sql.connect.dataframe tests")
+            .remote("local[4]")
+            .getOrCreate()
+        )
 
         (failure_count, test_count) = doctest.testmod(
             pyspark.sql.connect.dataframe,
@@ -1562,7 +1573,7 @@ def _test() -> None:
         )
 
         globs["spark"].stop()
-        globs["_spark"].stop()
+
         if failure_count:
             sys.exit(-1)
     else:
