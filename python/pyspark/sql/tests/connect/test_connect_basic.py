@@ -234,8 +234,8 @@ class SparkConnectBasicTests(SparkConnectSQLTestCase):
                 self.spark.read.json(path=d, primitivesAsString=True).toPandas(),
             )
 
-    def test_paruqet(self):
-        # SPARK-41445: Implement DataFrameReader.paruqet
+    def test_parquet(self):
+        # SPARK-41445: Implement DataFrameReader.parquet
         with tempfile.TemporaryDirectory() as d:
             # Write a DataFrame into a JSON file
             self.spark.createDataFrame([{"age": 100, "name": "Hyukjin Kwon"}]).write.mode(
@@ -255,6 +255,33 @@ class SparkConnectBasicTests(SparkConnectSQLTestCase):
             ).write.mode("overwrite").format("text").save(d)
             # Read the text file as a DataFrame.
             self.assert_eq(self.connect.read.text(d).toPandas(), self.spark.read.text(d).toPandas())
+
+    def test_multi_paths(self):
+        # SPARK-42041: DataFrameReader should support list of paths
+
+        with tempfile.TemporaryDirectory() as d:
+            text_files = []
+            for i in range(0, 3):
+                text_file = f"{d}/text-{i}.text"
+                shutil.copyfile("python/test_support/sql/text-test.txt", text_file)
+                text_files.append(text_file)
+
+            self.assertEqual(
+                self.connect.read.text(text_files).collect(),
+                self.spark.read.text(text_files).collect(),
+            )
+
+        with tempfile.TemporaryDirectory() as d:
+            json_files = []
+            for i in range(0, 5):
+                json_file = f"{d}/json-{i}.json"
+                shutil.copyfile("python/test_support/sql/people.json", json_file)
+                json_files.append(json_file)
+
+            self.assertEqual(
+                self.connect.read.json(json_files).collect(),
+                self.spark.read.json(json_files).collect(),
+            )
 
     def test_join_condition_column_list_columns(self):
         left_connect_df = self.connect.read.table(self.tbl_name)
@@ -1394,6 +1421,28 @@ class SparkConnectBasicTests(SparkConnectSQLTestCase):
             .toPandas(),
         )
 
+    def test_union_by_name(self):
+        # SPARK-41832: Test unionByName
+        data1 = [(1, 2, 3)]
+        data2 = [(6, 2, 5)]
+        df1_connect = self.connect.createDataFrame(data1, ["a", "b", "c"])
+        df2_connect = self.connect.createDataFrame(data2, ["a", "b", "c"])
+        union_df_connect = df1_connect.unionByName(df2_connect)
+
+        df1_spark = self.spark.createDataFrame(data1, ["a", "b", "c"])
+        df2_spark = self.spark.createDataFrame(data2, ["a", "b", "c"])
+        union_df_spark = df1_spark.unionByName(df2_spark)
+
+        self.assert_eq(union_df_connect.toPandas(), union_df_spark.toPandas())
+
+        df2_connect = self.connect.createDataFrame(data2, ["a", "B", "C"])
+        union_df_connect = df1_connect.unionByName(df2_connect, allowMissingColumns=True)
+
+        df2_spark = self.spark.createDataFrame(data2, ["a", "B", "C"])
+        union_df_spark = df1_spark.unionByName(df2_spark, allowMissingColumns=True)
+
+        self.assert_eq(union_df_connect.toPandas(), union_df_spark.toPandas())
+
     def test_random_split(self):
         # SPARK-41440: test randomSplit(weights, seed).
         relations = (
@@ -2496,6 +2545,7 @@ class SparkConnectBasicTests(SparkConnectSQLTestCase):
     def test_unsupported_io_functions(self):
         # SPARK-41964: Disable unsupported functions.
         # DataFrameWriterV2 is also not implemented yet
+        df = self.connect.createDataFrame([(x, f"{x}") for x in range(100)], ["id", "name"])
 
         for f in ("csv", "orc", "jdbc"):
             with self.assertRaises(NotImplementedError):
@@ -2503,7 +2553,7 @@ class SparkConnectBasicTests(SparkConnectSQLTestCase):
 
         for f in ("jdbc",):
             with self.assertRaises(NotImplementedError):
-                getattr(self.connect.read, f)()
+                getattr(df.write, f)()
 
 
 @unittest.skipIf(not should_test_connect, connect_requirement_message)
