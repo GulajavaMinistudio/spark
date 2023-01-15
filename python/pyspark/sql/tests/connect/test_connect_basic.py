@@ -256,6 +256,16 @@ class SparkConnectBasicTests(SparkConnectSQLTestCase):
             # Read the text file as a DataFrame.
             self.assert_eq(self.connect.read.text(d).toPandas(), self.spark.read.text(d).toPandas())
 
+    def test_csv(self):
+        # SPARK-42011: Implement DataFrameReader.csv
+        with tempfile.TemporaryDirectory() as d:
+            # Write a DataFrame into a text file
+            self.spark.createDataFrame(
+                [{"name": "Sandeep Singh"}, {"name": "Hyukjin Kwon"}]
+            ).write.mode("overwrite").format("csv").save(d)
+            # Read the text file as a DataFrame.
+            self.assert_eq(self.connect.read.csv(d).toPandas(), self.spark.read.csv(d).toPandas())
+
     def test_multi_paths(self):
         # SPARK-42041: DataFrameReader should support list of paths
 
@@ -282,6 +292,16 @@ class SparkConnectBasicTests(SparkConnectSQLTestCase):
                 self.connect.read.json(json_files).collect(),
                 self.spark.read.json(json_files).collect(),
             )
+
+    def test_orc(self):
+        # SPARK-42012: Implement DataFrameReader.orc
+        with tempfile.TemporaryDirectory() as d:
+            # Write a DataFrame into a text file
+            self.spark.createDataFrame(
+                [{"name": "Sandeep Singh"}, {"name": "Hyukjin Kwon"}]
+            ).write.mode("overwrite").format("orc").save(d)
+            # Read the text file as a DataFrame.
+            self.assert_eq(self.connect.read.orc(d).toPandas(), self.spark.read.orc(d).toPandas())
 
     def test_join_condition_column_list_columns(self):
         left_connect_df = self.connect.read.table(self.tbl_name)
@@ -2547,7 +2567,7 @@ class SparkConnectBasicTests(SparkConnectSQLTestCase):
         # DataFrameWriterV2 is also not implemented yet
         df = self.connect.createDataFrame([(x, f"{x}") for x in range(100)], ["id", "name"])
 
-        for f in ("csv", "orc", "jdbc"):
+        for f in ("jdbc",):
             with self.assertRaises(NotImplementedError):
                 getattr(self.connect.read, f)()
 
