@@ -15,26 +15,28 @@
  * limitations under the License.
  */
 
-package org.apache.spark.status.protobuf
+package org.apache.spark.sql.connector
 
-import com.google.protobuf.MessageOrBuilder
+import org.apache.spark.sql.AnalysisException
 
-object Utils {
-  def getOptional[T](condition: Boolean, result: () => T): Option[T] = if (condition) {
-    Some(result())
-  } else {
-    None
+class DeltaBasedDeleteFromTableSuite extends DeleteFromTableSuiteBase {
+
+  override protected lazy val extraTableProps: java.util.Map[String, String] = {
+    val props = new java.util.HashMap[String, String]()
+    props.put("supports-deltas", "true")
+    props
   }
 
-  def setStringField(input: String, f: String => MessageOrBuilder): Unit = {
-    if (input != null) {
-      f(input)
+  test("nullable row ID attrs") {
+    createAndInitTable("pk INT, salary INT, dep STRING",
+      """{ "pk": 1, "salary": 300, "dep": 'hr' }
+        |{ "pk": 2, "salary": 150, "dep": 'software' }
+        |{ "pk": 3, "salary": 120, "dep": 'hr' }
+        |""".stripMargin)
+
+    val exception = intercept[AnalysisException] {
+      sql(s"DELETE FROM $tableNameAsString WHERE pk = 1")
     }
-  }
-
-  def getStringField(condition: Boolean, result: () => String): String = if (condition) {
-    result()
-  } else {
-    null
+    assert(exception.message.contains("Row ID attributes cannot be nullable"))
   }
 }
