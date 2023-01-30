@@ -265,6 +265,11 @@
           "Input to <functionName> should all be the same type, but it's <dataType>."
         ]
       },
+      "FILTER_NOT_BOOLEAN" : {
+        "message" : [
+          "Filter expression <filter> of type <type> is not a boolean."
+        ]
+      },
       "HASH_MAP_TYPE" : {
         "message" : [
           "Input to the function <functionName> cannot contain elements of the \"MAP\" type. In Spark, same maps may have different hashcode, thus hash expressions are prohibited on \"MAP\" elements. To restore previous behavior set \"spark.sql.legacy.allowHashOnMapType\" to \"true\"."
@@ -1145,6 +1150,16 @@
       "Invalid pivot value '<value>': value data type <valueType> does not match pivot column data type <pivotType>."
     ],
     "sqlState" : "42K09"
+  },
+  "PLAN_VALIDATION_FAILED_RULE_EXECUTOR" : {
+    "message" : [
+      "The input plan of <ruleExecutor> is invalid: <reason>"
+    ]
+  },
+  "PLAN_VALIDATION_FAILED_RULE_IN_BATCH" : {
+    "message" : [
+      "Rule <rule> in batch <batch> generated an invalid plan: <reason>"
+    ]
   },
   "PROTOBUF_DEPENDENCY_NOT_FOUND" : {
     "message" : [
@@ -4375,16 +4390,6 @@
       "<plan>."
     ]
   },
-  "_LEGACY_ERROR_TEMP_2173" : {
-    "message" : [
-      "The structural integrity of the input plan is broken in <className>."
-    ]
-  },
-  "_LEGACY_ERROR_TEMP_2174" : {
-    "message" : [
-      "After applying rule <ruleName> in batch <batchName>, the structural integrity of the plan is broken."
-    ]
-  },
   "_LEGACY_ERROR_TEMP_2175" : {
     "message" : [
       "Rule id not found for <ruleName>. Please modify RuleIdCollection.scala if you are adding a new rule."
@@ -5173,11 +5178,6 @@
   "_LEGACY_ERROR_TEMP_2414" : {
     "message" : [
       "Event time must be defined on a window or a timestamp, but <evName> is of type <evType>."
-    ]
-  },
-  "_LEGACY_ERROR_TEMP_2415" : {
-    "message" : [
-      "filter expression '<filter>' of type <type> is not a boolean."
     ]
   },
   "_LEGACY_ERROR_TEMP_2416" : {
