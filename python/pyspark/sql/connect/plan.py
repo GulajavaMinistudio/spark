@@ -375,17 +375,16 @@ class Project(LogicalPlan):
                 )
 
     def plan(self, session: "SparkConnectClient") -> proto.Relation:
+        from pyspark.sql.connect.functions import col
+
         assert self._child is not None
+
         proj_exprs = []
         for c in self._columns:
             if isinstance(c, Column):
                 proj_exprs.append(c.to_plan(session))
-            elif c == "*":
-                exp = proto.Expression()
-                exp.unresolved_star.SetInParent()
-                proj_exprs.append(exp)
             else:
-                proj_exprs.append(self.unresolved_attr(c))
+                proj_exprs.append(col(c).to_plan(session))
 
         plan = proto.Relation()
         plan.project.input.CopyFrom(self._child.plan(session))
@@ -1729,45 +1728,47 @@ class RecoverPartitions(LogicalPlan):
         self._table_name = table_name
 
     def plan(self, session: "SparkConnectClient") -> proto.Relation:
-        plan = proto.Relation(catalog=proto.Catalog(recover_partitions=proto.RecoverPartitions()))
-        plan.catalog.recover_partitions.table_name = self._table_name
+        plan = proto.Relation(
+            catalog=proto.Catalog(
+                recover_partitions=proto.RecoverPartitions(table_name=self._table_name)
+            )
+        )
         return plan
 
 
-# TODO(SPARK-41612): Support Catalog.isCached
-# class IsCached(LogicalPlan):
-#     def __init__(self, table_name: str) -> None:
-#         super().__init__(None)
-#         self._table_name = table_name
-#
-#     def plan(self, session: "SparkConnectClient") -> proto.Relation:
-#         plan = proto.Relation(catalog=proto.Catalog(is_cached=proto.IsCached()))
-#         plan.catalog.is_cached.table_name = self._table_name
-#         return plan
-#
-#
-# TODO(SPARK-41600): Support Catalog.cacheTable
-# class CacheTable(LogicalPlan):
-#     def __init__(self, table_name: str) -> None:
-#         super().__init__(None)
-#         self._table_name = table_name
-#
-#     def plan(self, session: "SparkConnectClient") -> proto.Relation:
-#         plan = proto.Relation(catalog=proto.Catalog(cache_table=proto.CacheTable()))
-#         plan.catalog.cache_table.table_name = self._table_name
-#         return plan
-#
-#
-# TODO(SPARK-41623): Support Catalog.uncacheTable
-# class UncacheTable(LogicalPlan):
-#     def __init__(self, table_name: str) -> None:
-#         super().__init__(None)
-#         self._table_name = table_name
-#
-#     def plan(self, session: "SparkConnectClient") -> proto.Relation:
-#         plan = proto.Relation(catalog=proto.Catalog(uncache_table=proto.UncacheTable()))
-#         plan.catalog.uncache_table.table_name = self._table_name
-#         return plan
+class IsCached(LogicalPlan):
+    def __init__(self, table_name: str) -> None:
+        super().__init__(None)
+        self._table_name = table_name
+
+    def plan(self, session: "SparkConnectClient") -> proto.Relation:
+        plan = proto.Relation(
+            catalog=proto.Catalog(is_cached=proto.IsCached(table_name=self._table_name))
+        )
+        return plan
+
+
+class CacheTable(LogicalPlan):
+    def __init__(self, table_name: str) -> None:
+        super().__init__(None)
+        self._table_name = table_name
+
+    def plan(self, session: "SparkConnectClient") -> proto.Relation:
+        plan = proto.Relation(
+            catalog=proto.Catalog(cache_table=proto.CacheTable(table_name=self._table_name))
+        )
+        return plan
+
+
+class UncacheTable(LogicalPlan):
+    def __init__(self, table_name: str) -> None:
+        super().__init__(None)
+        self._table_name = table_name
+
+    def plan(self, session: "SparkConnectClient") -> proto.Relation:
+        plan = proto.Relation(catalog=proto.Catalog(uncache_table=proto.UncacheTable()))
+        plan.catalog.uncache_table.table_name = self._table_name
+        return plan
 
 
 class ClearCache(LogicalPlan):

@@ -1,3 +1,5 @@
+#!/usr/bin/env bash
+
 #
 # Licensed to the Apache Software Foundation (ASF) under one or more
 # contributor license agreements.  See the NOTICE file distributed with
@@ -15,22 +17,10 @@
 # limitations under the License.
 #
 
-from pyspark.sql.tests.test_catalog import CatalogTestsMixin
-from pyspark.testing.connectutils import ReusedConnectTestCase
+# Stops the connect server on the machine this script is executed on.
 
+if [ -z "${SPARK_HOME}" ]; then
+  export SPARK_HOME="$(cd "`dirname "$0"`"/..; pwd)"
+fi
 
-class CatalogParityTests(CatalogTestsMixin, ReusedConnectTestCase):
-    pass
-
-
-if __name__ == "__main__":
-    import unittest
-    from pyspark.sql.tests.connect.test_parity_catalog import *  # noqa: F401
-
-    try:
-        import xmlrunner  # type: ignore[import]
-
-        testRunner = xmlrunner.XMLTestRunner(output="target/test-reports", verbosity=2)
-    except ImportError:
-        testRunner = None
-    unittest.main(testRunner=testRunner, verbosity=2)
+"${SPARK_HOME}/sbin"/spark-daemon.sh stop org.apache.spark.sql.connect.service.SparkConnectServer 1

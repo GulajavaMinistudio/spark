@@ -1,3 +1,5 @@
+#!/usr/bin/env bash
+
 #
 # Licensed to the Apache Software Foundation (ASF) under one or more
 # contributor license agreements.  See the NOTICE file distributed with
@@ -15,22 +17,25 @@
 # limitations under the License.
 #
 
-from pyspark.sql.tests.test_catalog import CatalogTestsMixin
-from pyspark.testing.connectutils import ReusedConnectTestCase
+# Enter posix mode for bash 
+set -o posix 
 
+# Shell script for starting the Spark Connect server
+if [ -z "${SPARK_HOME}" ]; then
+  export SPARK_HOME="$(cd "`dirname "$0"`"/..; pwd)"
+fi
 
-class CatalogParityTests(CatalogTestsMixin, ReusedConnectTestCase):
-    pass
+# NOTE: This exact class name is matched downstream by SparkSubmit.
+# Any changes need to be reflected there.
+CLASS="org.apache.spark.sql.connect.service.SparkConnectServer"
 
+if [[ "$@" = *--help ]] || [[ "$@" = *-h ]]; then
+  echo "Usage: ./sbin/start-connect-server.sh [options]"
 
-if __name__ == "__main__":
-    import unittest
-    from pyspark.sql.tests.connect.test_parity_catalog import *  # noqa: F401
+  "${SPARK_HOME}"/bin/spark-submit --help 2>&1 | grep -v Usage 1>&2
+  exit 1
+fi
 
-    try:
-        import xmlrunner  # type: ignore[import]
+. "${SPARK_HOME}/bin/load-spark-env.sh"
 
-        testRunner = xmlrunner.XMLTestRunner(output="target/test-reports", verbosity=2)
-    except ImportError:
-        testRunner = None
-    unittest.main(testRunner=testRunner, verbosity=2)
+exec "${SPARK_HOME}"/sbin/spark-daemon.sh submit $CLASS 1 --name "Spark Connect server" "$@"
