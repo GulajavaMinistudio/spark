@@ -1291,16 +1291,6 @@ private[sql] object QueryExecutionErrors extends QueryErrorsBase {
       messageParameters = Map("simpleString" -> StructType.simpleString, "raw" -> raw))
   }
 
-  def failedMergingFieldsError(leftName: String, rightName: String, e: Throwable): Throwable = {
-    new SparkException(
-      errorClass = "_LEGACY_ERROR_TEMP_2123",
-      messageParameters = Map(
-        "leftName" -> leftName,
-        "rightName" -> rightName,
-        "message" -> e.getMessage),
-      cause = null)
-  }
-
   def cannotMergeDecimalTypesWithIncompatibleScaleError(
       leftScale: Int, rightScale: Int): Throwable = {
     new SparkException(
@@ -1313,10 +1303,10 @@ private[sql] object QueryExecutionErrors extends QueryErrorsBase {
 
   def cannotMergeIncompatibleDataTypesError(left: DataType, right: DataType): Throwable = {
     new SparkException(
-      errorClass = "_LEGACY_ERROR_TEMP_2125",
+      errorClass = "CANNOT_MERGE_INCOMPATIBLE_DATA_TYPE",
       messageParameters = Map(
-        "leftCatalogString" -> left.catalogString,
-        "rightCatalogString" -> right.catalogString),
+        "left" -> toSQLType(left),
+        "right" -> toSQLType(right)),
       cause = null)
   }
 
@@ -1330,11 +1320,10 @@ private[sql] object QueryExecutionErrors extends QueryErrorsBase {
 
   def duplicateMapKeyFoundError(key: Any): SparkRuntimeException = {
     new SparkRuntimeException(
-      errorClass = "_LEGACY_ERROR_TEMP_2127",
+      errorClass = "DUPLICATED_MAP_KEY",
       messageParameters = Map(
         "key" -> key.toString(),
-        "mapKeyDedupPolicy" -> toSQLConf(SQLConf.MAP_KEY_DEDUP_POLICY.key),
-        "lastWin" -> toSQLConf(SQLConf.MapKeyDedupPolicy.LAST_WIN.toString())))
+        "mapKeyDedupPolicy" -> toSQLConf(SQLConf.MAP_KEY_DEDUP_POLICY.key)))
   }
 
   def mapDataKeyArrayLengthDiffersFromValueArrayLengthError(): SparkRuntimeException = {

@@ -85,6 +85,10 @@ class DataFrameParityTests(DataFrameTestsMixin, ReusedConnectTestCase):
     def test_same_semantics_error(self):
         super().test_same_semantics_error()
 
+    # Spark Connect throws `IllegalArgumentException` when calling `collect` instead of `sample`.
+    def test_sample(self):
+        super().test_sample()
+
     @unittest.skip("Spark Connect does not support RDD but the tests depend on them.")
     def test_toDF_with_schema_string(self):
         super().test_toDF_with_schema_string()
