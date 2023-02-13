@@ -919,13 +919,25 @@ class SubqueryAlias(LogicalPlan):
 
 
 class SQL(LogicalPlan):
-    def __init__(self, query: str) -> None:
+    def __init__(self, query: str, args: Optional[Dict[str, str]] = None) -> None:
         super().__init__(None)
+
+        if args is not None:
+            for k, v in args.items():
+                assert isinstance(k, str)
+                assert isinstance(v, str)
+
         self._query = query
+        self._args = args
 
     def plan(self, session: "SparkConnectClient") -> proto.Relation:
         rel = proto.Relation()
         rel.sql.query = self._query
+
+        if self._args is not None and len(self._args) > 0:
+            for k, v in self._args.items():
+                rel.sql.args[k] = v
+
         return rel
 
 
@@ -989,7 +1001,7 @@ class Unpivot(LogicalPlan):
         self,
         child: Optional["LogicalPlan"],
         ids: List["ColumnOrName"],
-        values: List["ColumnOrName"],
+        values: Optional[List["ColumnOrName"]],
         variable_column_name: str,
         value_column_name: str,
     ) -> None:
@@ -1011,7 +1023,8 @@ class Unpivot(LogicalPlan):
         plan = proto.Relation()
         plan.unpivot.input.CopyFrom(self._child.plan(session))
         plan.unpivot.ids.extend([self.col_to_expr(x, session) for x in self.ids])
-        plan.unpivot.values.extend([self.col_to_expr(x, session) for x in self.values])
+        if self.values is not None:
+            plan.unpivot.values.values.extend([self.col_to_expr(x, session) for x in self.values])
         plan.unpivot.variable_column_name = self.variable_column_name
         plan.unpivot.value_column_name = self.value_column_name
         return plan
