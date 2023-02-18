@@ -1036,6 +1036,29 @@ class Dataset[T] private[sql] (val session: SparkSession, private[sql] val plan:
   }
 
   /**
+   * Groups the Dataset using the specified columns, so we can run aggregation on them. See
+   * [[RelationalGroupedDataset]] for all the available aggregate functions.
+   *
+   * {{{
+   *   // Compute the average for all numeric columns grouped by department.
+   *   ds.groupBy($"department").avg()
+   *
+   *   // Compute the max age and average salary, grouped by department and gender.
+   *   ds.groupBy($"department", $"gender").agg(Map(
+   *     "salary" -> "avg",
+   *     "age" -> "max"
+   *   ))
+   * }}}
+   *
+   * @group untypedrel
+   * @since 3.4.0
+   */
+  @scala.annotation.varargs
+  def groupBy(cols: Column*): RelationalGroupedDataset = {
+    new RelationalGroupedDataset(toDF(), cols.map(_.expr))
+  }
+
+  /**
    * Unpivot a DataFrame from wide format to long format, optionally leaving identifier columns
    * set. This is the reverse to `groupBy(...).pivot(...).agg(...)`, except for the aggregation,
    * which cannot be reversed.
@@ -2040,6 +2063,15 @@ class Dataset[T] private[sql] (val session: SparkSession, private[sql] val plan:
   def toLocalIterator(): java.util.Iterator[T] = {
     // TODO make this a destructive iterator.
     collectResult().iterator.asInstanceOf[java.util.Iterator[T]]
+  }
+
+  /**
+   * Returns the number of rows in the Dataset.
+   * @group action
+   * @since 3.4.0
+   */
+  def count(): Long = {
+    groupBy().count().collect().head.getLong(0)
   }
 
   private def buildRepartition(numPartitions: Int, shuffle: Boolean): Dataset[T] = {

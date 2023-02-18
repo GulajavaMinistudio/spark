@@ -20,7 +20,6 @@ import java.nio.file.{Files, Path}
 
 import scala.collection.mutable
 import scala.util.{Failure, Success, Try}
-import scala.util.Properties.versionNumberString
 
 import com.google.protobuf.util.JsonFormat
 import io.grpc.inprocess.InProcessChannelBuilder
@@ -31,7 +30,8 @@ import org.apache.spark.connect.proto
 import org.apache.spark.internal.Logging
 import org.apache.spark.sql.{functions => fn}
 import org.apache.spark.sql.connect.client.SparkConnectClient
-import org.apache.spark.sql.types.{MapType, MetadataBuilder, StringType, StructType}
+import org.apache.spark.sql.functions.lit
+import org.apache.spark.sql.types._
 
 // scalastyle:off
 /**
@@ -58,8 +58,6 @@ class PlanGenerationTestSuite extends ConnectFunSuite with BeforeAndAfterAll wit
   // Borrowed from SparkFunSuite
   private val regenerateGoldenFiles: Boolean = System.getenv("SPARK_GENERATE_GOLDEN_FILES") == "1"
 
-  private val scala = versionNumberString.substring(0, versionNumberString.indexOf(".", 2))
-
   // Borrowed from SparkFunSuite
   private def getWorkspaceFilePath(first: String, more: String*): Path = {
     if (!(sys.props.contains("spark.test.home") || sys.env.contains("SPARK_HOME"))) {
@@ -81,6 +79,17 @@ class PlanGenerationTestSuite extends ConnectFunSuite with BeforeAndAfterAll wit
   }
 
   protected val queryFilePath: Path = baseResourcePath.resolve("queries")
+
+  // A relative path to /connector/connect/server, used by `ProtoToParsedPlanTestSuite` to run
+  // with the datasource.
+  protected val testDataPath: Path = java.nio.file.Paths.get(
+    "../",
+    "common",
+    "src",
+    "test",
+    "resources",
+    "query-tests",
+    "test-data")
 
   private val printer = JsonFormat.printer()
 
@@ -197,6 +206,47 @@ class PlanGenerationTestSuite extends ConnectFunSuite with BeforeAndAfterAll wit
     session.range(1, 10, 1, 2)
   }
 
+  test("read") {
+    session.read
+      .format("csv")
+      .schema(
+        StructType(
+          StructField("name", StringType) ::
+            StructField("age", IntegerType) ::
+            StructField("job", StringType) :: Nil))
+      .option("header", "true")
+      .options(Map("delimiter" -> ";"))
+      .load(testDataPath.resolve("people.csv").toString)
+  }
+
+  test("read json") {
+    session.read.json(testDataPath.resolve("people.json").toString)
+  }
+
+  test("read csv") {
+    session.read.csv(testDataPath.resolve("people.csv").toString)
+  }
+
+  test("read parquet") {
+    session.read.parquet(testDataPath.resolve("users.parquet").toString)
+  }
+
+  test("read orc") {
+    session.read.orc(testDataPath.resolve("users.orc").toString)
+  }
+
+  test("read table") {
+    session.read.table("myTable")
+  }
+
+  test("table") {
+    session.table("myTable")
+  }
+
+  test("read text") {
+    session.read.text(testDataPath.resolve("people.txt").toString)
+  }
+
   /* Dataset API */
   test("select") {
     simple.select(fn.col("id"))
@@ -250,11 +300,11 @@ class PlanGenerationTestSuite extends ConnectFunSuite with BeforeAndAfterAll wit
   }
 
   test("join inner_condition") {
-    left.join(right, fn.col("a") === fn.col("a"))
+    left.alias("l").join(right.alias("r"), fn.col("l.a") === fn.col("r.a"))
   }
 
   test("join condition") {
-    left.join(right, fn.col("id") === fn.col("id"), "left_anti")
+    left.as("l").join(right.as("r"), fn.col("l.id") === fn.col("r.id"), "left_anti")
   }
 
   test("crossJoin") {
@@ -298,7 +348,7 @@ class PlanGenerationTestSuite extends ConnectFunSuite with BeforeAndAfterAll wit
   }
 
   test("colRegex") {
-    simple.select(simple.colRegex("a|id"))
+    simple.select(simple.colRegex("`a|id`"))
   }
 
   test("as string") {
@@ -379,7 +429,7 @@ class PlanGenerationTestSuite extends ConnectFunSuite with BeforeAndAfterAll wit
   }
 
   test("unionByName") {
-    simple.unionByName(right)
+    simple.drop("b").unionByName(right.drop("payload"))
   }
 
   test("unionByName allowMissingColumns") {
@@ -669,13 +719,13 @@ class PlanGenerationTestSuite extends ConnectFunSuite with BeforeAndAfterAll wit
   }
 
   columnTest("as multi") {
-    fn.col("d").as(Array("v1", "v2", "v3"))
+    fn.expr("inline(map_values(f))").as(Array("v1", "v2", "v3"))
   }
 
   columnTest("as with metadata") {
     val builder = new MetadataBuilder
-    builder.putString("comment", "modified C field")
-    fn.col("c").as("c_mod", builder.build())
+    builder.putString("comment", "modified E field")
+    fn.col("e").as("e_mod", builder.build())
   }
 
   columnTest("cast") {
@@ -723,34 +773,474 @@ class PlanGenerationTestSuite extends ConnectFunSuite with BeforeAndAfterAll wit
   }
 
   columnTest("star with target") {
-    fn.col("str.*")
+    fn.col("d.*")
   }
 
   /* Function API */
-  test("function col") {
-    select(fn.col("id"))
+  private def functionTest(name: String)(f: => Column): Unit = {
+    test("function " + name) {
+      complex.select(f)
+    }
+  }
+
+  functionTest("col") {
+    fn.col("id")
+  }
+
+  functionTest("asc") {
+    fn.asc("a")
+  }
+
+  functionTest("asc_nulls_first") {
+    fn.asc_nulls_first("a")
+  }
+
+  functionTest("asc_nulls_last") {
+    fn.asc_nulls_last("a")
+  }
+
+  functionTest("desc") {
+    fn.desc("a")
+  }
+
+  functionTest("desc_nulls_first") {
+    fn.desc_nulls_first("a")
+  }
+
+  functionTest("desc_nulls_last") {
+    fn.desc_nulls_last("a")
+  }
+
+  functionTest("approx_count_distinct") {
+    fn.approx_count_distinct("a")
+  }
+
+  functionTest("approx_count_distinct rsd") {
+    fn.approx_count_distinct("a", 0.1)
+  }
+
+  functionTest("avg") {
+    fn.avg("a")
+  }
+
+  functionTest("collect_list") {
+    fn.collect_list("a")
+  }
+
+  functionTest("collect_set") {
+    fn.collect_set("a")
+  }
+
+  functionTest("corr") {
+    fn.corr("a", "b")
+  }
+
+  functionTest("count") {
+    fn.count(fn.col("a"))
+  }
+
+  functionTest("countDistinct") {
+    fn.countDistinct("a", "g")
+  }
+
+  functionTest("covar_pop") {
+    fn.covar_pop("a", "b")
+  }
+
+  functionTest("covar_samp") {
+    fn.covar_samp("a", "b")
+  }
+
+  functionTest("first") {
+    fn.first("a", ignoreNulls = true)
+  }
+
+  functionTest("kurtosis") {
+    fn.kurtosis("a")
+  }
+
+  functionTest("last") {
+    fn.last("a", ignoreNulls = false)
+  }
+
+  functionTest("mode") {
+    fn.mode(fn.col("a"))
   }
 
   test("function max") {
-    select(fn.max(Column("id")))
+    select(fn.max("id"))
   }
 
-  test("function udf " + scala) {
-    // This test might be a bit tricky if different JVM
-    // versions are used to generate the golden files.
-    val functions = Seq(
-      fn.udf(TestUDFs.udf0)
-        .asNonNullable()
-        .asNondeterministic(),
-      fn.udf(TestUDFs.udf1).withName("foo"),
-      fn.udf(TestUDFs.udf2).withName("f3"),
-      fn.udf(TestUDFs.udf3).withName("bar"),
-      fn.udf(TestUDFs.udf4).withName("f_four"))
-    val id = fn.col("id")
-    val columns = functions.zipWithIndex.map { case (udf, i) =>
-      udf(Seq.fill(i)(id): _*)
-    }
-    select(columns: _*)
+  functionTest("max_by") {
+    fn.max_by(fn.col("a"), fn.col("b"))
+  }
+
+  functionTest("median") {
+    fn.median(fn.col("a"))
+  }
+
+  functionTest("min") {
+    fn.min("a")
+  }
+
+  functionTest("min_by") {
+    fn.min_by(fn.col("a"), fn.col("b"))
+  }
+
+  functionTest("percentile_approx") {
+    fn.percentile_approx(fn.col("a"), fn.lit(0.3), fn.lit(20))
+  }
+
+  functionTest("product") {
+    fn.product(fn.col("a"))
+  }
+
+  functionTest("skewness") {
+    fn.skewness("a")
+  }
+
+  functionTest("stddev") {
+    fn.stddev("a")
+  }
+
+  functionTest("stddev_samp") {
+    fn.stddev_samp("a")
+  }
+
+  functionTest("stddev_pop") {
+    fn.stddev_pop("a")
+  }
+
+  functionTest("sum") {
+    fn.sum("a")
+  }
+
+  functionTest("sum_distinct") {
+    fn.sum_distinct(fn.col("a"))
+  }
+
+  functionTest("variance") {
+    fn.variance("a")
+  }
+
+  functionTest("var_samp") {
+    fn.var_samp("a")
+  }
+
+  functionTest("var_pop") {
+    fn.var_pop("a")
+  }
+
+  functionTest("array") {
+    fn.array("a", "a")
+  }
+
+  functionTest("map") {
+    fn.map(fn.col("a"), fn.col("g"), lit(22), lit("dummy"))
+  }
+
+  functionTest("map_from_arrays") {
+    fn.map_from_arrays(fn.array(lit(1), lit(2)), fn.array(lit("one"), lit("two")))
+  }
+
+  functionTest("coalesce") {
+    fn.coalesce(fn.col("a"), lit(3))
+  }
+
+  functionTest("input_file_name") {
+    fn.input_file_name()
+  }
+
+  functionTest("isnan") {
+    fn.isnan(fn.col("b"))
+  }
+
+  functionTest("isnull") {
+    fn.isnull(fn.col("a"))
+  }
+
+  functionTest("monotonically_increasing_id") {
+    fn.monotonically_increasing_id()
+  }
+
+  functionTest("nanvl") {
+    fn.nanvl(lit(Double.NaN), fn.col("a"))
+  }
+
+  functionTest("negate") {
+    fn.negate(fn.col("a"))
+  }
+
+  functionTest("rand with seed") {
+    fn.rand(133)
+  }
+
+  functionTest("randn with seed") {
+    fn.randn(133)
+  }
+
+  functionTest("spark_partition_id") {
+    fn.spark_partition_id()
+  }
+
+  functionTest("sqrt") {
+    fn.sqrt("b")
+  }
+
+  functionTest("struct") {
+    fn.struct("a", "d")
+  }
+
+  functionTest("bitwise_not") {
+    fn.bitwise_not(fn.col("a"))
+  }
+
+  functionTest("expr") {
+    fn.expr("a + 1")
+  }
+
+  functionTest("abs") {
+    fn.abs(fn.col("a"))
+  }
+
+  functionTest("acos") {
+    fn.acos("b")
+  }
+
+  functionTest("acosh") {
+    fn.acosh("b")
+  }
+
+  functionTest("asin") {
+    fn.asin("b")
+  }
+
+  functionTest("asinh") {
+    fn.asinh("b")
+  }
+
+  functionTest("atan") {
+    fn.atan("b")
+  }
+
+  functionTest("atan2") {
+    fn.atan2(fn.col("a").cast("double"), "b")
+  }
+
+  functionTest("atanh") {
+    fn.atanh("b")
+  }
+
+  functionTest("bin") {
+    fn.bin("b")
+  }
+
+  functionTest("ceil") {
+    fn.ceil("b")
+  }
+
+  functionTest("ceil scale") {
+    fn.ceil(fn.col("b"), lit(2))
+  }
+
+  functionTest("conv") {
+    fn.conv(fn.col("b"), 10, 16)
+  }
+
+  functionTest("cos") {
+    fn.cos("b")
+  }
+
+  functionTest("cosh") {
+    fn.cosh("b")
+  }
+
+  functionTest("cot") {
+    fn.cot(fn.col("b"))
+  }
+
+  functionTest("csc") {
+    fn.csc(fn.col("b"))
+  }
+
+  functionTest("exp") {
+    fn.exp("b")
+  }
+
+  functionTest("expm1") {
+    fn.expm1("b")
+  }
+
+  functionTest("factorial") {
+    fn.factorial(fn.col("a") % 10)
+  }
+
+  functionTest("floor") {
+    fn.floor("b")
+  }
+
+  functionTest("floor scale") {
+    fn.floor(fn.col("b"), lit(2))
+  }
+
+  functionTest("greatest") {
+    fn.greatest(fn.col("a"), fn.col("d").getItem("a"))
+  }
+
+  functionTest("hex") {
+    fn.hex(fn.col("a"))
+  }
+
+  functionTest("unhex") {
+    fn.unhex(fn.col("a"))
+  }
+
+  functionTest("hypot") {
+    fn.hypot(fn.col("a"), fn.col("b"))
+  }
+
+  functionTest("least") {
+    fn.least(fn.col("a"), fn.col("d").getItem("a"))
+  }
+
+  functionTest("log") {
+    fn.log("b")
+  }
+
+  functionTest("log with base") {
+    fn.log(2, "b")
+  }
+
+  functionTest("log10") {
+    fn.log10("b")
+  }
+
+  functionTest("log1p") {
+    fn.log1p("a")
+  }
+
+  functionTest("log2") {
+    fn.log2("a")
+  }
+
+  functionTest("pow") {
+    fn.pow("a", "b")
+  }
+
+  functionTest("pmod") {
+    fn.pmod(fn.col("a"), fn.lit(10))
+  }
+
+  functionTest("rint") {
+    fn.rint("b")
+  }
+
+  functionTest("round") {
+    fn.round(fn.col("b"), 2)
+  }
+
+  functionTest("bround") {
+    fn.round(fn.col("b"), 2)
+  }
+
+  functionTest("sec") {
+    fn.sec(fn.col("b"))
+  }
+
+  functionTest("shiftleft") {
+    fn.shiftleft(fn.col("b"), 2)
+  }
+
+  functionTest("shiftright") {
+    fn.shiftright(fn.col("b"), 2)
+  }
+
+  functionTest("shiftrightunsigned") {
+    fn.shiftrightunsigned(fn.col("b"), 2)
+  }
+
+  functionTest("signum") {
+    fn.signum("b")
+  }
+
+  functionTest("sin") {
+    fn.sin("b")
+  }
+
+  functionTest("sinh") {
+    fn.sinh("b")
+  }
+
+  functionTest("tan") {
+    fn.tan("b")
+  }
+
+  functionTest("tanh") {
+    fn.tanh("b")
+  }
+
+  functionTest("degrees") {
+    fn.degrees("b")
+  }
+
+  functionTest("radians") {
+    fn.radians("b")
+  }
+
+  test("groupby agg") {
+    simple
+      .groupBy(Column("id"))
+      .agg(
+        "a" -> "max",
+        "b" -> "stddev",
+        "b" -> "std",
+        "b" -> "mean",
+        "b" -> "average",
+        "b" -> "avg",
+        "*" -> "size",
+        "a" -> "count")
+  }
+
+  test("groupby agg columns") {
+    simple
+      .groupBy(Column("id"))
+      .agg(functions.max("a"), functions.sum("b"))
+  }
+
+  test("groupby max") {
+    simple
+      .groupBy(Column("id"))
+      .max("a", "b")
+  }
+
+  test("groupby min") {
+    simple
+      .groupBy(Column("id"))
+      .min("a", "b")
+  }
+
+  test("groupby mean") {
+    simple
+      .groupBy(Column("id"))
+      .mean("a", "b")
+  }
+
+  test("groupby avg") {
+    simple
+      .groupBy(Column("id"))
+      .avg("a", "b")
+  }
+
+  test("groupby sum") {
+    simple
+      .groupBy(Column("id"))
+      .sum("a", "b")
+  }
+
+  test("groupby count") {
+    simple
+      .groupBy(Column("id"))
+      .count()
   }
 
   test("function lit") {
