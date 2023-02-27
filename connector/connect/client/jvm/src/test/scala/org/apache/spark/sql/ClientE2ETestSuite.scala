@@ -26,6 +26,7 @@ import org.apache.commons.io.FileUtils
 import org.apache.commons.io.output.TeeOutputStream
 import org.scalactic.TolerantNumerics
 
+import org.apache.spark.SPARK_VERSION
 import org.apache.spark.sql.connect.client.util.{IntegrationTestUtils, RemoteSparkSession}
 import org.apache.spark.sql.functions.{aggregate, array, col, lit, rand, sequence, shuffle, transform, udf}
 import org.apache.spark.sql.types._
@@ -405,5 +406,25 @@ class ClientE2ETestSuite extends RemoteSparkSession {
     val right = spark.range(100).select(col("id"), rand(12).as("a"))
     val joined = left.join(right, left("id") === right("id")).select(left("id"), right("a"))
     assert(joined.schema.catalogString === "struct<id:bigint,a:double>")
+  }
+
+  test("test temp view") {
+    spark.range(100).createTempView("test1")
+    assert(spark.sql("SELECT * FROM test1").count() == 100)
+    spark.range(1000).createOrReplaceTempView("test1")
+    assert(spark.sql("SELECT * FROM test1").count() == 1000)
+    spark.range(100).createGlobalTempView("view1")
+    assert(spark.sql("SELECT * FROM global_temp.view1").count() == 100)
+    spark.range(1000).createOrReplaceGlobalTempView("view1")
+    assert(spark.sql("SELECT * FROM global_temp.view1").count() == 1000)
+  }
+
+  test("version") {
+    assert(spark.version == SPARK_VERSION)
+  }
+
+  test("time") {
+    val timeFragments = Seq("Time taken: ", " ms")
+    testCapturedStdOut(spark.time(spark.sql("select 1").collect()), timeFragments: _*)
   }
 }
