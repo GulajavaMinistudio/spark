@@ -115,7 +115,7 @@ class SparkSession private[sql] (
   private def createDataset[T](encoder: AgnosticEncoder[T], data: Iterator[T]): Dataset[T] = {
     newDataset(encoder) { builder =>
       val localRelationBuilder = builder.getLocalRelationBuilder
-        .setSchema(encoder.schema.catalogString)
+        .setSchema(encoder.schema.json)
       if (data.nonEmpty) {
         val timeZoneId = conf.get("spark.sql.session.timeZone")
         val arrowData = ConvertToArrow(encoder, data, timeZoneId, allocator)
@@ -344,7 +344,7 @@ class SparkSession private[sql] (
   // scalastyle:on
 
   def newSession(): SparkSession = {
-    throw new UnsupportedOperationException("newSession is not supported")
+    SparkSession.builder().client(client.copy()).build()
   }
 
   private def range(
@@ -398,6 +398,10 @@ class SparkSession private[sql] (
       explainMode: Option[proto.AnalyzePlanRequest.Explain.ExplainMode] = None)
       : proto.AnalyzePlanResponse = {
     client.analyze(method, Some(plan), explainMode)
+  }
+
+  private[sql] def sameSemantics(plan: proto.Plan, otherPlan: proto.Plan): Boolean = {
+    client.sameSemantics(plan, otherPlan).getSameSemantics.getResult
   }
 
   private[sql] def execute[T](plan: proto.Plan, encoder: AgnosticEncoder[T]): SparkResult[T] = {
