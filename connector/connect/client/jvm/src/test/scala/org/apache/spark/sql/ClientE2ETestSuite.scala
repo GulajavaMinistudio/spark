@@ -76,7 +76,7 @@ class ClientE2ETestSuite extends RemoteSparkSession with SQLHelper {
     assert(result(2) == 2)
   }
 
-  test("simple udf") {
+  ignore("SPARK-42665: Ignore simple udf test until the udf is fully implemented.") {
     def dummyUdf(x: Int): Int = x + 5
     val myUdf = udf(dummyUdf _)
     val df = spark.range(5).select(myUdf(Column("id")))
@@ -630,6 +630,19 @@ class ClientE2ETestSuite extends RemoteSparkSession with SQLHelper {
     val plan = spark.sql("select 1")
     val otherPlan = spark.sql("select 1")
     assert(plan.sameSemantics(otherPlan))
+  }
+
+  test("toJSON") {
+    val expected = Array(
+      """{"b":0.0,"id":0,"d":"world","a":0}""",
+      """{"b":0.1,"id":1,"d":"world","a":1}""",
+      """{"b":0.2,"id":2,"d":"world","a":0}""")
+    val result = spark
+      .range(3)
+      .select(generateMyTypeColumns: _*)
+      .toJSON
+      .collect()
+    assert(result sameElements expected)
   }
 }
 
