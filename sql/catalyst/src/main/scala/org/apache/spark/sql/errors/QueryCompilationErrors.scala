@@ -2630,8 +2630,8 @@ private[sql] object QueryCompilationErrors extends QueryErrorsBase {
 
   def showPartitionNotAllowedOnTableNotPartitionedError(tableIdentWithDB: String): Throwable = {
     new AnalysisException(
-      errorClass = "_LEGACY_ERROR_TEMP_1269",
-      messageParameters = Map("tableIdentWithDB" -> tableIdentWithDB))
+      errorClass = "INVALID_PARTITION_OPERATION.PARTITION_SCHEMA_IS_EMPTY",
+      messageParameters = Map("name" -> toSQLId(tableIdentWithDB)))
   }
 
   def showCreateTableNotSupportedOnTempView(table: String): Throwable = {
@@ -2719,20 +2719,20 @@ private[sql] object QueryCompilationErrors extends QueryErrorsBase {
       viewIdent: TableIdentifier,
       newPath: Seq[TableIdentifier]): Throwable = {
     new AnalysisException(
-      errorClass = "_LEGACY_ERROR_TEMP_1281",
+      errorClass = "RECURSIVE_VIEW",
       messageParameters = Map(
-        "viewIdent" -> viewIdent.toString,
-        "newPath" -> newPath.mkString(" -> ")))
+        "viewIdent" -> toSQLId(viewIdent.nameParts),
+        "newPath" -> newPath.map(p => toSQLId(p.nameParts)).mkString(" -> ")))
   }
 
   def notAllowedToCreatePermanentViewWithoutAssigningAliasForExpressionError(
       name: TableIdentifier,
-      attrName: String): Throwable = {
+      attr: Attribute): Throwable = {
     new AnalysisException(
-      errorClass = "_LEGACY_ERROR_TEMP_1282",
+      errorClass = "CREATE_PERMANENT_VIEW_WITHOUT_ALIAS",
       messageParameters = Map(
-        "name" -> name.toString,
-        "attrName" -> attrName))
+        "name" -> toSQLId(name.nameParts),
+        "attr" -> toSQLExpr(attr)))
   }
 
   def notAllowedToCreatePermanentViewByReferencingTempViewError(
@@ -3130,16 +3130,16 @@ private[sql] object QueryCompilationErrors extends QueryErrorsBase {
       messageParameters = Map.empty)
   }
 
-  def invalidTimestampExprForTimeTravel(expr: Expression): Throwable = {
+  def invalidTimestampExprForTimeTravel(errorClass: String, expr: Expression): Throwable = {
     new AnalysisException(
-      errorClass = "_LEGACY_ERROR_TEMP_1335",
-      messageParameters = Map("expr" -> expr.sql))
+      errorClass = errorClass,
+      messageParameters = Map("expr" -> toSQLExpr(expr)))
   }
 
-  def timeTravelUnsupportedError(target: String): Throwable = {
+  def timeTravelUnsupportedError(relationId: String): Throwable = {
     new AnalysisException(
-      errorClass = "_LEGACY_ERROR_TEMP_1336",
-      messageParameters = Map("target" -> target))
+      errorClass = "UNSUPPORTED_FEATURE.TIME_TRAVEL",
+      messageParameters = Map("relationId" -> relationId))
   }
 
   def tableNotSupportTimeTravelError(tableName: Identifier): Throwable = {
@@ -3363,10 +3363,10 @@ private[sql] object QueryCompilationErrors extends QueryErrorsBase {
       messageParameters = Map("messageName" -> messageName))
   }
 
-  def descriptorParseError(descFilePath: String, cause: Throwable): Throwable = {
+  def descriptorParseError(cause: Throwable): Throwable = {
     new AnalysisException(
       errorClass = "CANNOT_PARSE_PROTOBUF_DESCRIPTOR",
-      messageParameters = Map("descFilePath" -> descFilePath),
+      messageParameters = Map.empty,
       cause = Option(cause))
   }
 
@@ -3374,13 +3374,6 @@ private[sql] object QueryCompilationErrors extends QueryErrorsBase {
     new AnalysisException(
       errorClass = "PROTOBUF_DESCRIPTOR_FILE_NOT_FOUND",
       messageParameters = Map("filePath" -> filePath),
-      cause = Option(cause))
-  }
-
-  def failedParsingDescriptorError(descFilePath: String, cause: Throwable): Throwable = {
-    new AnalysisException(
-      errorClass = "CANNOT_CONSTRUCT_PROTOBUF_DESCRIPTOR",
-      messageParameters = Map("descFilePath" -> descFilePath),
       cause = Option(cause))
   }
 

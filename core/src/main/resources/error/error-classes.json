@@ -54,11 +54,6 @@
     ],
     "sqlState" : "42846"
   },
-  "CANNOT_CONSTRUCT_PROTOBUF_DESCRIPTOR" : {
-    "message" : [
-      "Error constructing FileDescriptor for <descFilePath>."
-    ]
-  },
   "CANNOT_CONVERT_PROTOBUF_FIELD_TYPE_TO_SQL_TYPE" : {
     "message" : [
       "Cannot convert Protobuf <protobufColumn> to SQL <sqlColumn> because schema is incompatible (protobufType = <protobufType>, sqlType = <sqlType>)."
@@ -132,7 +127,7 @@
   },
   "CANNOT_PARSE_PROTOBUF_DESCRIPTOR" : {
     "message" : [
-      "Error parsing file <descFilePath> descriptor byte[] into Descriptor object."
+      "Error parsing descriptor bytes into Protobuf FileDescriptorSet."
     ]
   },
   "CANNOT_PARSE_TIMESTAMP" : {
@@ -268,6 +263,11 @@
       "The value <str> (<fmt>) cannot be converted to <targetType> because it is malformed. Correct the value as per the syntax, or change its format. Use <suggestion> to tolerate malformed input and return NULL instead."
     ],
     "sqlState" : "22018"
+  },
+  "CREATE_PERMANENT_VIEW_WITHOUT_ALIAS" : {
+    "message" : [
+      "Not allowed to create the permanent view <name> without explicitly assigning an alias for the expression <attr>."
+    ]
   },
   "CREATE_TABLE_COLUMN_DESCRIPTOR_DUPLICATE" : {
     "message" : [
@@ -573,6 +573,11 @@
     ],
     "sqlState" : "42704"
   },
+  "DISTINCT_WINDOW_FUNCTION_UNSUPPORTED" : {
+    "message" : [
+      "Distinct window functions are not supported: <windowExpr>."
+    ]
+  },
   "DIVIDE_BY_ZERO" : {
     "message" : [
       "Division by zero. Use `try_divide` to tolerate divisor being 0 and return NULL instead. If necessary set <config> to \"false\" to bypass this error."
@@ -610,6 +615,11 @@
   "ENCODER_NOT_FOUND" : {
     "message" : [
       "Not found an encoder of the type <typeName> to Spark SQL internal representation. Consider to change the input type to one of supported at '<docroot>/sql-ref-datatypes.html'."
+    ]
+  },
+  "EVENT_TIME_IS_NOT_ON_TIMESTAMP_TYPE" : {
+    "message" : [
+      "The event time <eventName> has the invalid type <eventType>, but expected \"TIMESTAMP\"."
     ]
   },
   "FAILED_EXECUTE_UDF" : {
@@ -1156,6 +1166,23 @@
     },
     "sqlState" : "22023"
   },
+  "INVALID_PARTITION_OPERATION" : {
+    "message" : [
+      "The partition command is invalid."
+    ],
+    "subClass" : {
+      "PARTITION_MANAGEMENT_IS_UNSUPPORTED" : {
+        "message" : [
+          "Table <name> does not support partition management."
+        ]
+      },
+      "PARTITION_SCHEMA_IS_EMPTY" : {
+        "message" : [
+          "Table <name> is not partitioned."
+        ]
+      }
+    }
+  },
   "INVALID_PROPERTY_KEY" : {
     "message" : [
       "<key> is an invalid property key, please use quotes, e.g. SET <key>=<value>."
@@ -1208,6 +1235,11 @@
       "Invalid SQL syntax:"
     ],
     "subClass" : {
+      "ANALYZE_TABLE_UNEXPECTED_NOSCAN" : {
+        "message" : [
+          "ANALYZE TABLE(S) ... COMPUTE STATISTICS ... <ctx> must be either NOSCAN or empty."
+        ]
+      },
       "CREATE_FUNC_WITH_IF_NOT_EXISTS_AND_REPLACE" : {
         "message" : [
           "CREATE FUNCTION with both IF NOT EXISTS and REPLACE is not allowed."
@@ -1304,6 +1336,28 @@
       "Cannot create the persistent object <objName> of the type <obj> because it references to the temporary object <tempObjName> of the type <tempObj>. Please make the temporary object <tempObjName> persistent, or make the persistent object <objName> temporary."
     ]
   },
+  "INVALID_TIME_TRAVEL_TIMESTAMP_EXPR" : {
+    "message" : [
+      "The time travel timestamp expression <expr> is invalid."
+    ],
+    "subClass" : {
+      "INPUT" : {
+        "message" : [
+          "Cannot be casted to the \"TIMESTAMP\" type."
+        ]
+      },
+      "NON_DETERMINISTIC" : {
+        "message" : [
+          "Must be deterministic."
+        ]
+      },
+      "UNEVALUABLE" : {
+        "message" : [
+          "Must be evaluable."
+        ]
+      }
+    }
+  },
   "INVALID_TYPED_LITERAL" : {
     "message" : [
       "The value of the typed literal <valueType> is invalid: <value>."
@@ -1321,6 +1375,11 @@
       "Rewrite the query to avoid window functions, aggregate functions, and generator functions in the WHERE clause."
     ],
     "sqlState" : "42903"
+  },
+  "INVALID_WINDOW_SPEC_FOR_AGGREGATION_FUNC" : {
+    "message" : [
+      "Cannot specify ORDER BY or a window frame for <aggFunc>."
+    ]
   },
   "INVALID_WRITE_DISTRIBUTION" : {
     "message" : [
@@ -1343,6 +1402,11 @@
         ]
       }
     }
+  },
+  "JOIN_CONDITION_IS_NOT_BOOLEAN_TYPE" : {
+    "message" : [
+      "The join condition <joinCondition> has the invalid type <conditionType>, expected \"BOOLEAN\"."
+    ]
   },
   "LOCATION_ALREADY_EXISTS" : {
     "message" : [
@@ -1441,6 +1505,29 @@
         ]
       }
     }
+  },
+  "NOT_A_CONSTANT_STRING" : {
+    "message" : [
+      "The expression <expr> used for the routine or clause <name> must be a constant STRING which is NOT NULL."
+    ],
+    "subClass" : {
+      "NOT_CONSTANT" : {
+        "message" : [
+          "To be considered constant the expression must not depend on any columns, contain a subquery, or invoke a non deterministic function such as rand()."
+        ]
+      },
+      "NULL" : {
+        "message" : [
+          "The expression evaluates to NULL."
+        ]
+      },
+      "WRONG_TYPE" : {
+        "message" : [
+          "The data type of the expression is <dataType>."
+        ]
+      }
+    },
+    "sqlState" : "42601"
   },
   "NOT_A_PARTITIONED_TABLE" : {
     "message" : [
@@ -1641,6 +1728,11 @@
       "Found recursive reference in Protobuf schema, which can not be processed by Spark by default: <fieldDescriptor>. try setting the option `recursive.fields.max.depth` 0 to 10. Going beyond 10 levels of recursion is not allowed."
     ]
   },
+  "RECURSIVE_VIEW" : {
+    "message" : [
+      "Recursive view <viewIdent> detected (cycle: <newPath>)."
+    ]
+  },
   "RENAME_SRC_PATH_NOT_FOUND" : {
     "message" : [
       "Failed to rename as <sourcePath> was not found."
@@ -1707,6 +1799,11 @@
       "The second argument of <functionName> function needs to be an integer."
     ],
     "sqlState" : "22023"
+  },
+  "SEED_EXPRESSION_IS_UNFOLDABLE" : {
+    "message" : [
+      "The seed expression <seedExpr> of the expression <exprWithSeed> must be foldable."
+    ]
   },
   "SORT_BY_WITHOUT_BUCKETING" : {
     "message" : [
@@ -2117,6 +2214,11 @@
           "Table <tableName> does not support <operation>. Please check the current catalog and namespace to make sure the qualified table name is expected, and also check the catalog implementation which is configured by \"spark.sql.catalog\"."
         ]
       },
+      "TIME_TRAVEL" : {
+        "message" : [
+          "Time travel on the relation: <relationId>."
+        ]
+      },
       "TOO_MANY_TYPE_ARGUMENTS_FOR_UDF_CLASS" : {
         "message" : [
           "UDF class with <num> type arguments."
@@ -2281,6 +2383,16 @@
       "To tolerate the error on drop use DROP VIEW IF EXISTS."
     ],
     "sqlState" : "42P01"
+  },
+  "WINDOW_FUNCTION_AND_FRAME_MISMATCH" : {
+    "message" : [
+      "<funcName> function can only be evaluated in an ordered row-based window frame with a single offset: <windowExpr>."
+    ]
+  },
+  "WINDOW_FUNCTION_WITHOUT_OVER_CLAUSE" : {
+    "message" : [
+      "Window function <funcName> requires an OVER clause."
+    ]
   },
   "WRITE_STREAM_NOT_ALLOWED" : {
     "message" : [
@@ -3591,11 +3703,6 @@
       "Failed to truncate table <tableIdentWithDB> when removing data of the path: <path>."
     ]
   },
-  "_LEGACY_ERROR_TEMP_1269" : {
-    "message" : [
-      "SHOW PARTITIONS is not allowed on a table that is not partitioned: <tableIdentWithDB>."
-    ]
-  },
   "_LEGACY_ERROR_TEMP_1270" : {
     "message" : [
       "SHOW CREATE TABLE is not supported on a temporary view: <table>."
@@ -3649,16 +3756,6 @@
   "_LEGACY_ERROR_TEMP_1280" : {
     "message" : [
       "It is not allowed to create a persisted view from the Dataset API."
-    ]
-  },
-  "_LEGACY_ERROR_TEMP_1281" : {
-    "message" : [
-      "Recursive view <viewIdent> detected (cycle: <newPath>)."
-    ]
-  },
-  "_LEGACY_ERROR_TEMP_1282" : {
-    "message" : [
-      "Not allowed to create a permanent view <name> without explicitly assigning an alias for expression <attrName>."
     ]
   },
   "_LEGACY_ERROR_TEMP_1285" : {
@@ -3892,11 +3989,6 @@
   "_LEGACY_ERROR_TEMP_1335" : {
     "message" : [
       "<expr> is not a valid timestamp expression for time travel."
-    ]
-  },
-  "_LEGACY_ERROR_TEMP_1336" : {
-    "message" : [
-      "Cannot time travel <target>."
     ]
   },
   "_LEGACY_ERROR_TEMP_1337" : {
@@ -5367,66 +5459,6 @@
   "_LEGACY_ERROR_TEMP_2331" : {
     "message" : [
       "failed to evaluate expression <sqlExpr>: <msg>"
-    ]
-  },
-  "_LEGACY_ERROR_TEMP_2404" : {
-    "message" : [
-      "Table <name> is not partitioned."
-    ]
-  },
-  "_LEGACY_ERROR_TEMP_2405" : {
-    "message" : [
-      "Table <name> does not support partition management."
-    ]
-  },
-  "_LEGACY_ERROR_TEMP_2406" : {
-    "message" : [
-      "invalid cast from <srcType> to <targetType>."
-    ]
-  },
-  "_LEGACY_ERROR_TEMP_2407" : {
-    "message" : [
-      "grouping_id() can only be used with GroupingSets/Cube/Rollup."
-    ]
-  },
-  "_LEGACY_ERROR_TEMP_2408" : {
-    "message" : [
-      "Window function <w> requires an OVER clause."
-    ]
-  },
-  "_LEGACY_ERROR_TEMP_2409" : {
-    "message" : [
-      "Distinct window functions are not supported: <w>."
-    ]
-  },
-  "_LEGACY_ERROR_TEMP_2410" : {
-    "message" : [
-      "<wf> function can only be evaluated in an ordered row-based window frame with a single offset: <w>."
-    ]
-  },
-  "_LEGACY_ERROR_TEMP_2411" : {
-    "message" : [
-      "Cannot specify order by or frame for '<aggFunc>'."
-    ]
-  },
-  "_LEGACY_ERROR_TEMP_2413" : {
-    "message" : [
-      "Input argument to <argName> must be a constant."
-    ]
-  },
-  "_LEGACY_ERROR_TEMP_2414" : {
-    "message" : [
-      "Event time must be defined on a window or a timestamp, but <evName> is of type <evType>."
-    ]
-  },
-  "_LEGACY_ERROR_TEMP_2416" : {
-    "message" : [
-      "join condition '<join>' of type <type> is not a boolean."
-    ]
-  },
-  "_LEGACY_ERROR_TEMP_2417" : {
-    "message" : [
-      "join condition '<condition>' of type <dataType> is not a boolean."
     ]
   },
   "_LEGACY_ERROR_TEMP_2418" : {
