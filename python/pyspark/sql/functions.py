@@ -32,6 +32,7 @@ from typing import (
     overload,
     Optional,
     Tuple,
+    Type,
     TYPE_CHECKING,
     Union,
     ValuesView,
@@ -47,6 +48,7 @@ from pyspark.sql.types import ArrayType, DataType, StringType, StructType, _from
 
 # Keep UserDefinedFunction import for backwards compatible import; moved in SPARK-22409
 from pyspark.sql.udf import UserDefinedFunction, _create_py_udf  # noqa: F401
+from pyspark.sql.udtf import UserDefinedTableFunction, _create_udtf
 
 # Keep pandas_udf and PandasUDFType import for backwards compatible import; moved in SPARK-28264
 from pyspark.sql.pandas.functions import pandas_udf, PandasUDFType  # noqa: F401
@@ -6379,6 +6381,116 @@ def session_window(timeColumn: "ColumnOrName", gapDuration: Union[Column, str]) 
     return _invoke_function("session_window", time_col, gap_duration)
 
 
+def to_unix_timestamp(
+    timestamp: "ColumnOrName",
+    format: Optional["ColumnOrName"] = None,
+) -> Column:
+    """
+    Returns the UNIX timestamp of the given time.
+
+    .. versionadded:: 3.5.0
+
+    Parameters
+    ----------
+    timestamp : :class:`~pyspark.sql.Column` or str
+        Input column or strings.
+    format : :class:`~pyspark.sql.Column` or str, optional
+        format to use to convert UNIX timestamp values.
+
+    Examples
+    --------
+    >>> spark.conf.set("spark.sql.session.timeZone", "America/Los_Angeles")
+    >>> df = spark.createDataFrame([("2016-04-08",)], ["e"])
+    >>> df.select(to_unix_timestamp(df.e, lit("yyyy-MM-dd")).alias('r')).collect()
+    [Row(r=1460098800)]
+    >>> spark.conf.unset("spark.sql.session.timeZone")
+
+    >>> spark.conf.set("spark.sql.session.timeZone", "America/Los_Angeles")
+    >>> df = spark.createDataFrame([("2016-04-08",)], ["e"])
+    >>> df.select(to_unix_timestamp(df.e).alias('r')).collect()
+    [Row(r=None)]
+    >>> spark.conf.unset("spark.sql.session.timeZone")
+    """
+    if format is not None:
+        return _invoke_function_over_columns("to_unix_timestamp", timestamp, format)
+    else:
+        return _invoke_function_over_columns("to_unix_timestamp", timestamp)
+
+
+def to_timestamp_ltz(
+    timestamp: "ColumnOrName",
+    format: Optional["ColumnOrName"] = None,
+) -> Column:
+    """
+    Parses the `timestamp` with the `format` to a timestamp without time zone.
+    Returns null with invalid input.
+
+    .. versionadded:: 3.5.0
+
+    Parameters
+    ----------
+    timestamp : :class:`~pyspark.sql.Column` or str
+        Input column or strings.
+    format : :class:`~pyspark.sql.Column` or str, optional
+        format to use to convert type `TimestampType` timestamp values.
+
+    Examples
+    --------
+    >>> spark.conf.set("spark.sql.session.timeZone", "UTC")
+    >>> df = spark.createDataFrame([("2016-12-31",)], ["e"])
+    >>> df.select(to_timestamp_ltz(df.e, lit("yyyy-MM-dd")).alias('r')).collect()
+    [Row(r=datetime.datetime(2016, 12, 31, 0, 0))]
+    >>> spark.conf.unset("spark.sql.session.timeZone")
+
+    >>> spark.conf.set("spark.sql.session.timeZone", "UTC")
+    >>> df = spark.createDataFrame([("2016-12-31",)], ["e"])
+    >>> df.select(to_timestamp_ltz(df.e).alias('r')).collect()
+    [Row(r=datetime.datetime(2016, 12, 31, 0, 0))]
+    >>> spark.conf.unset("spark.sql.session.timeZone")
+    """
+    if format is not None:
+        return _invoke_function_over_columns("to_timestamp_ltz", timestamp, format)
+    else:
+        return _invoke_function_over_columns("to_timestamp_ltz", timestamp)
+
+
+def to_timestamp_ntz(
+    timestamp: "ColumnOrName",
+    format: Optional["ColumnOrName"] = None,
+) -> Column:
+    """
+    Parses the `timestamp` with the `format` to a timestamp without time zone.
+    Returns null with invalid input.
+
+    .. versionadded:: 3.5.0
+
+    Parameters
+    ----------
+    timestamp : :class:`~pyspark.sql.Column` or str
+        Input column or strings.
+    format : :class:`~pyspark.sql.Column` or str, optional
+        format to use to convert type `TimestampNTZType` timestamp values.
+
+    Examples
+    --------
+    >>> spark.conf.set("spark.sql.session.timeZone", "America/Los_Angeles")
+    >>> df = spark.createDataFrame([("2016-04-08",)], ["e"])
+    >>> df.select(to_timestamp_ntz(df.e, lit("yyyy-MM-dd")).alias('r')).collect()
+    [Row(r=datetime.datetime(2016, 4, 8, 0, 0))]
+    >>> spark.conf.unset("spark.sql.session.timeZone")
+
+    >>> spark.conf.set("spark.sql.session.timeZone", "America/Los_Angeles")
+    >>> df = spark.createDataFrame([("2016-04-08",)], ["e"])
+    >>> df.select(to_timestamp_ntz(df.e).alias('r')).collect()
+    [Row(r=datetime.datetime(2016, 4, 8, 0, 0))]
+    >>> spark.conf.unset("spark.sql.session.timeZone")
+    """
+    if format is not None:
+        return _invoke_function_over_columns("to_timestamp_ntz", timestamp, format)
+    else:
+        return _invoke_function_over_columns("to_timestamp_ntz", timestamp)
+
+
 # ---------------------------- misc functions ----------------------------------
 
 
@@ -7934,6 +8046,119 @@ def translate(srcCol: "ColumnOrName", matching: str, replace: str) -> Column:
     [Row(r='1a2s3ae')]
     """
     return _invoke_function("translate", _to_java_column(srcCol), matching, replace)
+
+
+@try_remote_functions
+def to_binary(col: "ColumnOrName", format: Optional["ColumnOrName"] = None) -> Column:
+    """
+    Converts the input `col` to a binary value based on the supplied `format`.
+    The `format` can be a case-insensitive string literal of "hex", "utf-8", "utf8",
+    or "base64". By default, the binary format for conversion is "hex" if
+    `format` is omitted. The function returns NULL if at least one of the
+    input parameters is NULL.
+
+    .. versionadded:: 3.5.0
+
+    Parameters
+    ----------
+    col : :class:`~pyspark.sql.Column` or str
+        Input column or strings.
+    format : :class:`~pyspark.sql.Column` or str, optional
+        format to use to convert binary values.
+
+    Examples
+    --------
+    >>> df = spark.createDataFrame([("abc",)], ["e"])
+    >>> df.select(to_binary(df.e, lit("utf-8")).alias('r')).collect()
+    [Row(r=bytearray(b'abc'))]
+
+    >>> df = spark.createDataFrame([("414243",)], ["e"])
+    >>> df.select(to_binary(df.e).alias('r')).collect()
+    [Row(r=bytearray(b'ABC'))]
+    """
+    if format is not None:
+        return _invoke_function_over_columns("to_binary", col, format)
+    else:
+        return _invoke_function_over_columns("to_binary", col)
+
+
+def to_char(col: "ColumnOrName", format: "ColumnOrName") -> Column:
+    """
+    Convert `col` to a string based on the `format`.
+    Throws an exception if the conversion fails. The format can consist of the following
+    characters, case insensitive:
+    '0' or '9': Specifies an expected digit between 0 and 9. A sequence of 0 or 9 in the
+    format string matches a sequence of digits in the input value, generating a result
+    string of the same length as the corresponding sequence in the format string.
+    The result string is left-padded with zeros if the 0/9 sequence comprises more digits
+    than the matching part of the decimal value, starts with 0, and is before the decimal
+    point. Otherwise, it is padded with spaces.
+    '.' or 'D': Specifies the position of the decimal point (optional, only allowed once).
+    ',' or 'G': Specifies the position of the grouping (thousands) separator (,).
+    There must be a 0 or 9 to the left and right of each grouping separator.
+    '$': Specifies the location of the $ currency sign. This character may only be specified once.
+    'S' or 'MI': Specifies the position of a '-' or '+' sign (optional, only allowed once at
+    the beginning or end of the format string). Note that 'S' prints '+' for positive
+    values but 'MI' prints a space.
+    'PR': Only allowed at the end of the format string; specifies that the result string
+    will be wrapped by angle brackets if the input value is negative.
+
+    .. versionadded:: 3.5.0
+
+    Parameters
+    ----------
+    col : :class:`~pyspark.sql.Column` or str
+        Input column or strings.
+    format : :class:`~pyspark.sql.Column` or str, optional
+        format to use to convert char values.
+
+    Examples
+    --------
+    >>> df = spark.createDataFrame([(78.12,)], ["e"])
+    >>> df.select(to_char(df.e, lit("$99.99")).alias('r')).collect()
+    [Row(r='$78.12')]
+    """
+    return _invoke_function_over_columns("to_char", col, format)
+
+
+def to_number(col: "ColumnOrName", format: "ColumnOrName") -> Column:
+    """
+    Convert string 'col' to a number based on the string format 'format'.
+    Throws an exception if the conversion fails. The format can consist of the following
+    characters, case insensitive:
+    '0' or '9': Specifies an expected digit between 0 and 9. A sequence of 0 or 9 in the
+    format string matches a sequence of digits in the input string. If the 0/9
+    sequence starts with 0 and is before the decimal point, it can only match a digit
+    sequence of the same size. Otherwise, if the sequence starts with 9 or is after
+    the decimal point, it can match a digit sequence that has the same or smaller size.
+    '.' or 'D': Specifies the position of the decimal point (optional, only allowed once).
+    ',' or 'G': Specifies the position of the grouping (thousands) separator (,).
+    There must be a 0 or 9 to the left and right of each grouping separator.
+    'col' must match the grouping separator relevant for the size of the number.
+    '$': Specifies the location of the $ currency sign. This character may only be
+    specified once.
+    'S' or 'MI': Specifies the position of a '-' or '+' sign (optional, only allowed
+    once at the beginning or end of the format string). Note that 'S' allows '-'
+    but 'MI' does not.
+    'PR': Only allowed at the end of the format string; specifies that 'col' indicates a
+    negative number with wrapping angled brackets.
+
+    .. versionadded:: 3.5.0
+
+    Parameters
+    ----------
+    col : :class:`~pyspark.sql.Column` or str
+        Input column or strings.
+    format : :class:`~pyspark.sql.Column` or str, optional
+        format to use to convert number values.
+
+    Examples
+    --------
+    >>> df = spark.createDataFrame([("$78.12",)], ["e"])
+    >>> df.select(to_number(df.e, lit("$99.99")).alias('r')).collect()
+    [Row(r=Decimal('78.12'))]
+    """
+    return _invoke_function_over_columns("to_number", col, format)
 
 
 # ---------------------- Collection functions ------------------------------
@@ -10636,6 +10861,47 @@ def map_zip_with(
     return _invoke_higher_order_function("MapZipWith", [col1, col2], [f])
 
 
+def str_to_map(
+    text: "ColumnOrName",
+    pairDelim: Optional["ColumnOrName"] = None,
+    keyValueDelim: Optional["ColumnOrName"] = None,
+) -> Column:
+    """
+    Creates a map after splitting the text into key/value pairs using delimiters.
+    Both `pairDelim` and `keyValueDelim` are treated as regular expressions.
+
+    .. versionadded:: 3.5.0
+
+    Parameters
+    ----------
+    text : :class:`~pyspark.sql.Column` or str
+        Input column or strings.
+    pairDelim : :class:`~pyspark.sql.Column` or str, optional
+        delimiter to use to split pair.
+    keyValueDelim : :class:`~pyspark.sql.Column` or str, optional
+        delimiter to use to split key/value.
+
+    Examples
+    --------
+    >>> df = spark.createDataFrame([("a:1,b:2,c:3",)], ["e"])
+    >>> df.select(str_to_map(df.e, lit(","), lit(":")).alias('r')).collect()
+    [Row(r={'a': '1', 'b': '2', 'c': '3'})]
+
+    >>> df = spark.createDataFrame([("a:1,b:2,c:3",)], ["e"])
+    >>> df.select(str_to_map(df.e, lit(",")).alias('r')).collect()
+    [Row(r={'a': '1', 'b': '2', 'c': '3'})]
+
+    >>> df = spark.createDataFrame([("a:1,b:2,c:3",)], ["e"])
+    >>> df.select(str_to_map(df.e).alias('r')).collect()
+    [Row(r={'a': '1', 'b': '2', 'c': '3'})]
+    """
+    if pairDelim is None:
+        pairDelim = lit(",")
+    if keyValueDelim is None:
+        keyValueDelim = lit(":")
+    return _invoke_function_over_columns("str_to_map", text, pairDelim, keyValueDelim)
+
+
 # ---------------------- Partition transform functions --------------------------------
 
 
@@ -11185,6 +11451,100 @@ def udf(
         )
     else:
         return _create_py_udf(f=f, returnType=returnType, useArrow=useArrow)
+
+
+def udtf(
+    cls: Optional[Type] = None,
+    *,
+    returnType: Union[StructType, str],
+) -> Union[UserDefinedTableFunction, functools.partial]:
+    """Creates a user defined table function (UDTF).
+
+    .. versionadded:: 3.5.0
+
+    Parameters
+    ----------
+    cls : class
+        the Python user-defined table function handler class.
+    returnType : :class:`pyspark.sql.types.StructType` or str
+        the return type of the user-defined table function. The value can be either a
+        :class:`pyspark.sql.types.StructType` object or a DDL-formatted struct type string.
+
+    Examples
+    --------
+    Implement the UDTF class
+
+    >>> class TestUDTF:
+    ...     def eval(self, *args: Any):
+    ...         yield "hello", "world"
+
+    Create the UDTF
+
+    >>> from pyspark.sql.functions import udtf
+    >>> test_udtf = udtf(TestUDTF, returnType="c1: string, c2: string")
+
+    Create the UDTF using the decorator
+
+    >>> @udtf(returnType="c1: int, c2: int")
+    ... class PlusOne:
+    ...     def eval(self, x: int):
+    ...         yield x, x + 1
+
+    Invoke the UDTF
+
+    >>> test_udtf().show()
+    +-----+-----+
+    |   c1|   c2|
+    +-----+-----+
+    |hello|world|
+    +-----+-----+
+
+    Invoke the UDTF with parameters
+
+    >>> from pyspark.sql.functions import lit
+    >>> PlusOne(lit(1)).show()
+    +---+---+
+    | c1| c2|
+    +---+---+
+    |  1|  2|
+    +---+---+
+
+    Notes
+    -----
+    User-defined table functions (UDTFs) are considered deterministic by default.
+    Use `asNondeterministic()` to mark a function as non-deterministic. E.g.:
+
+    >>> import random
+    >>> class RandomUDTF:
+    ...     def eval(self, a: int):
+    ...         yield a * int(random.random() * 100),
+    >>> random_udtf = udtf(RandomUDTF, returnType="r: int").asNondeterministic()
+
+    Use "yield" to produce one row for the UDTF result relation as many times
+    as needed. In the context of a lateral join, each such result row will be
+    associated with the most recent input row consumed from the "eval" method.
+    Or, use "return" to produce multiple rows for the UDTF result relation at
+    once.
+
+    >>> class TestUDTF:
+    ...     def eval(self, a: int):
+    ...         return [(a, a + 1), (a, a + 2)]
+    >>> test_udtf = udtf(TestUDTF, returnType="x: int, y: int")
+
+    User-defined table functions are considered opaque to the optimizer by default.
+    As a result, operations like filters from WHERE clauses or limits from
+    LIMIT/OFFSET clauses that appear after the UDTF call will execute on the
+    UDTF's result relation. By the same token, any relations forwarded as input
+    to UDTFs will plan as full table scans in the absence of any explicit such
+    filtering or other logic explicitly written in a table subquery surrounding the
+    provided input relation.
+
+    User-defined table functions do not accept keyword arguments on the calling side.
+    """
+    if cls is None:
+        return functools.partial(_create_udtf, returnType=returnType)
+    else:
+        return _create_udtf(cls=cls, returnType=returnType)
 
 
 def _test() -> None:
