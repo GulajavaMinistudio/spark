@@ -1283,6 +1283,62 @@ object functions {
   def histogram_numeric(e: Column, nBins: Column): Column =
     withAggregateFunction { new HistogramNumeric(e.expr, nBins.expr) }
 
+  /**
+   * Aggregate function: returns true if all values of `e` are true.
+   *
+   * @group agg_funcs
+   * @since 3.5.0
+   */
+  def every(e: Column): Column = withAggregateFunction { BoolAnd(e.expr) }
+
+  /**
+   * Aggregate function: returns true if all values of `e` are true.
+   *
+   * @group agg_funcs
+   * @since 3.5.0
+   */
+  def bool_and(e: Column): Column = withAggregateFunction { BoolAnd(e.expr) }
+
+  /**
+   * Aggregate function: returns true if at least one value of `e` is true.
+   *
+   * @group agg_funcs
+   * @since 3.5.0
+   */
+  def some(e: Column): Column = withAggregateFunction { BoolOr(e.expr) }
+
+  /**
+   * Aggregate function: returns true if at least one value of `e` is true.
+   *
+   * @group agg_funcs
+   * @since 3.5.0
+   */
+  def bool_or(e: Column): Column = withAggregateFunction { BoolOr(e.expr) }
+
+  /**
+   * Aggregate function: returns the bitwise AND of all non-null input values, or null if none.
+   *
+   * @group agg_funcs
+   * @since 3.5.0
+   */
+  def bit_and(e: Column): Column = withAggregateFunction { BitAndAgg(e.expr) }
+
+  /**
+   * Aggregate function: returns the bitwise OR of all non-null input values, or null if none.
+   *
+   * @group agg_funcs
+   * @since 3.5.0
+   */
+  def bit_or(e: Column): Column = withAggregateFunction { BitOrAgg(e.expr) }
+
+  /**
+   * Aggregate function: returns the bitwise XOR of all non-null input values, or null if none.
+   *
+   * @group agg_funcs
+   * @since 3.5.0
+   */
+  def bit_xor(e: Column): Column = withAggregateFunction { BitXorAgg(e.expr) }
+
   //////////////////////////////////////////////////////////////////////////////////////////////
   // Window functions
   //////////////////////////////////////////////////////////////////////////////////////////////
@@ -1881,6 +1937,35 @@ object functions {
    * @since 3.2.0
    */
   def bitwise_not(e: Column): Column = withExpr { BitwiseNot(e.expr) }
+
+  /**
+   * Returns the number of bits that are set in the argument expr as an unsigned 64-bit integer,
+   * or NULL if the argument is NULL.
+   *
+   * @group bitwise_funcs
+   * @since 3.5.0
+   */
+  def bit_count(e: Column): Column = withExpr { BitwiseCount(e.expr) }
+
+  /**
+   * Returns the value of the bit (0 or 1) at the specified position.
+   * The positions are numbered from right to left, starting at zero.
+   * The position argument cannot be negative.
+   *
+   * @group bitwise_funcs
+   * @since 3.5.0
+   */
+  def bit_get(e: Column, pos: Column): Column = withExpr { BitwiseGet(e.expr, pos.expr) }
+
+  /**
+   * Returns the value of the bit (0 or 1) at the specified position.
+   * The positions are numbered from right to left, starting at zero.
+   * The position argument cannot be negative.
+   *
+   * @group bitwise_funcs
+   * @since 3.5.0
+   */
+  def getbit(e: Column, pos: Column): Column = bit_get(e, pos)
 
   /**
    * Parses the expression string into the column that it represents, similar to
@@ -3815,6 +3900,181 @@ object functions {
     ToNumber(e.expr, format.expr)
   }
 
+  /**
+   * Replaces all occurrences of `search` with `replace`.
+   *
+   * @param src
+   *   A column of string to be replaced
+   * @param search
+   *   A column of string, If `search` is not found in `str`, `str` is returned unchanged.
+   * @param replace
+   *   A column of string, If `replace` is not specified or is an empty string, nothing replaces
+   *   the string that is removed from `str`.
+   *
+   * @group string_funcs
+   * @since 3.5.0
+   */
+  def replace(src: Column, search: Column, replace: Column): Column = withExpr {
+    StringReplace(src.expr, search.expr, replace.expr)
+  }
+
+  /**
+   * Replaces all occurrences of `search` with `replace`.
+   *
+   * @param src
+   *   A column of string to be replaced
+   * @param search
+   *   A column of string, If `search` is not found in `src`, `src` is returned unchanged.
+   *
+   * @group string_funcs
+   * @since 3.5.0
+   */
+  def replace(src: Column, search: Column): Column = withExpr {
+    new StringReplace(src.expr, search.expr)
+  }
+
+  /**
+   * Splits `str` by delimiter and return requested part of the split (1-based).
+   * If any input is null, returns null. if `partNum` is out of range of split parts,
+   * returns empty string. If `partNum` is 0, throws an error. If `partNum` is negative,
+   * the parts are counted backward from the end of the string.
+   * If the `delimiter` is an empty string, the `str` is not split.
+   *
+   * @group string_funcs
+   * @since 3.5.0
+   */
+  def split_part(str: Column, delimiter: Column, partNum: Column): Column = withExpr {
+    SplitPart(str.expr, delimiter.expr, partNum.expr)
+  }
+
+  /**
+   * Returns the substring of `str` that starts at `pos` and is of length `len`,
+   * or the slice of byte array that starts at `pos` and is of length `len`.
+   *
+   * @group string_funcs
+   * @since 3.5.0
+   */
+  def substr(str: Column, pos: Column, len: Column): Column = withExpr {
+    Substring(str.expr, pos.expr, len.expr)
+  }
+
+  /**
+   * Returns the substring of `str` that starts at `pos`,
+   * or the slice of byte array that starts at `pos`.
+   *
+   * @group string_funcs
+   * @since 3.5.0
+   */
+  def substr(str: Column, pos: Column): Column = withExpr {
+    new Substring(str.expr, pos.expr)
+  }
+
+  /**
+   * Extracts a part from a URL.
+   *
+   * @group string_funcs
+   * @since 3.5.0
+   */
+  def parse_url(url: Column, partToExtract: Column, key: Column): Column = withExpr {
+    ParseUrl(Seq(url.expr, partToExtract.expr, key.expr))
+  }
+
+  /**
+   * Extracts a part from a URL.
+   *
+   * @group string_funcs
+   * @since 3.5.0
+   */
+  def parse_url(url: Column, partToExtract: Column): Column = withExpr {
+    ParseUrl(Seq(url.expr, partToExtract.expr))
+  }
+
+  /**
+   * Formats the arguments in printf-style and returns the result as a string column.
+   *
+   * @group string_funcs
+   * @since 3.5.0
+   */
+  def printf(format: Column, arguments: Column*): Column = withExpr {
+    FormatString((lit(format) +: arguments).map(_.expr): _*)
+  }
+
+  /**
+   * Decodes a `str` in 'application/x-www-form-urlencoded' format
+   * using a specific encoding scheme.
+   *
+   * @group string_funcs
+   * @since 3.5.0
+   */
+  def url_decode(str: Column): Column = withExpr {
+    UrlDecode(str.expr)
+  }
+
+  /**
+   * Translates a string into 'application/x-www-form-urlencoded' format
+   * using a specific encoding scheme.
+   *
+   * @group string_funcs
+   * @since 3.5.0
+   */
+  def url_encode(str: Column): Column = withExpr {
+    UrlEncode(str.expr)
+  }
+
+  /**
+   * Returns the position of the first occurrence of `substr` in `str` after position `start`.
+   * The given `start` and return value are 1-based.
+   *
+   * @group string_funcs
+   * @since 3.5.0
+   */
+  def position(substr: Column, str: Column, start: Column): Column = withExpr {
+    StringLocate(substr.expr, str.expr, start.expr)
+  }
+
+  /**
+   * Returns the position of the first occurrence of `substr` in `str` after position `1`.
+   * The return value are 1-based.
+   *
+   * @group string_funcs
+   * @since 3.5.0
+   */
+  def position(substr: Column, str: Column): Column = withExpr {
+    new StringLocate(substr.expr, str.expr)
+  }
+
+  /**
+   * Returns a boolean. The value is True if str ends with suffix.
+   * Returns NULL if either input expression is NULL. Otherwise, returns False.
+   * Both str or suffix must be of STRING type.
+   *
+   * @note
+   *   Only STRING type is supported in this function, while `endswith` in SQL supports both
+   *   STRING and BINARY.
+   *
+   * @group string_funcs
+   * @since 3.5.0
+   */
+  def endswith(str: Column, suffix: Column): Column = withExpr {
+    EndsWith(str.expr, suffix.expr)
+  }
+
+  /**
+   * Returns a boolean. The value is True if str starts with prefix.
+   * Returns NULL if either input expression is NULL. Otherwise, returns False.
+   * Both str or prefix must be of STRING type.
+   *
+   * @note
+   *   Only STRING type is supported in this function, while `endswith` in SQL supports both
+   *   STRING and BINARY.
+   *
+   * @group string_funcs
+   * @since 3.5.0
+   */
+  def startswith(str: Column, prefix: Column): Column = withExpr {
+    StartsWith(str.expr, prefix.expr)
+  }
+
   //////////////////////////////////////////////////////////////////////////////////////////////
   // DateTime functions
   //////////////////////////////////////////////////////////////////////////////////////////////
@@ -3938,6 +4198,18 @@ object functions {
   def date_add(start: Column, days: Column): Column = withExpr { DateAdd(start.expr, days.expr) }
 
   /**
+   * Returns the date that is `days` days after `start`
+   *
+   * @param start A date, timestamp or string. If a string, the data must be in a format that
+   *              can be cast to a date, such as `yyyy-MM-dd` or `yyyy-MM-dd HH:mm:ss.SSSS`
+   * @param days  A column of the number of days to add to `start`, can be negative to subtract days
+   * @return A date, or null if `start` was a string that could not be cast to a date
+   * @group datetime_funcs
+   * @since 3.5.0
+   */
+  def dateadd(start: Column, days: Column): Column = date_add(start, days)
+
+  /**
    * Returns the date that is `days` days before `start`
    *
    * @param start A date, timestamp or string. If a string, the data must be in a format that
@@ -3983,6 +4255,34 @@ object functions {
   def datediff(end: Column, start: Column): Column = withExpr { DateDiff(end.expr, start.expr) }
 
   /**
+   * Returns the number of days from `start` to `end`.
+   *
+   * Only considers the date part of the input. For example:
+   * {{{
+   * dateddiff("2018-01-10 00:00:00", "2018-01-09 23:59:59")
+   * // returns 1
+   * }}}
+   *
+   * @param end A date, timestamp or string. If a string, the data must be in a format that
+   *            can be cast to a date, such as `yyyy-MM-dd` or `yyyy-MM-dd HH:mm:ss.SSSS`
+   * @param start A date, timestamp or string. If a string, the data must be in a format that
+   *              can be cast to a date, such as `yyyy-MM-dd` or `yyyy-MM-dd HH:mm:ss.SSSS`
+   * @return An integer, or null if either `end` or `start` were strings that could not be cast to
+   *         a date. Negative if `end` is before `start`
+   * @group datetime_funcs
+   * @since 3.5.0
+   */
+  def date_diff(end: Column, start: Column): Column = datediff(end, start)
+
+  /**
+   * Create date from the number of `days` since 1970-01-01.
+   *
+   * @group datetime_funcs
+   * @since 3.5.0
+   */
+  def date_from_unix_date(days: Column): Column = withExpr { DateFromUnixDate(days.expr) }
+
+  /**
    * Extracts the year as an integer from a given date/timestamp/string.
    * @return An integer, or null if the input was a string that could not be cast to a date
    * @group datetime_funcs
@@ -4022,6 +4322,14 @@ object functions {
    * @since 1.5.0
    */
   def dayofmonth(e: Column): Column = withExpr { DayOfMonth(e.expr) }
+
+  /**
+   * Extracts the day of the month as an integer from a given date/timestamp/string.
+   * @return An integer, or null if the input was a string that could not be cast to a date
+   * @group datetime_funcs
+   * @since 3.5.0
+   */
+  def day(e: Column): Column = dayofmonth(e)
 
   /**
    * Extracts the day of the year as an integer from a given date/timestamp/string.

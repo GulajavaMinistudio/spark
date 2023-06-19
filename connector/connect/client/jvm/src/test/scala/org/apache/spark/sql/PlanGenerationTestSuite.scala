@@ -210,6 +210,12 @@ class PlanGenerationTestSuite
 
   private val temporalsSchemaString = temporalsSchema.catalogString
 
+  private val booleanSchema = new StructType()
+    .add("id", "long")
+    .add("flag", "boolean")
+
+  private val booleanSchemaString = booleanSchema.catalogString
+
   private def createLocalRelation(schema: String): DataFrame = session.newDataFrame { builder =>
     // TODO API is not consistent. Now we have two different ways of working with schemas!
     builder.getLocalRelationBuilder.setSchema(schema)
@@ -222,6 +228,7 @@ class PlanGenerationTestSuite
   private def complex = createLocalRelation(complexSchemaString)
   private def binary = createLocalRelation(binarySchemaString)
   private def temporals = createLocalRelation(temporalsSchemaString)
+  private def boolean = createLocalRelation(booleanSchemaString)
 
   /* Spark Session API */
   test("range") {
@@ -1002,6 +1009,18 @@ class PlanGenerationTestSuite
     fn.histogram_numeric(fn.col("a"), lit(10))
   }
 
+  functionTest("bit_and") {
+    fn.bit_and(fn.col("a"))
+  }
+
+  functionTest("bit_or") {
+    fn.bit_or(fn.col("a"))
+  }
+
+  functionTest("bit_xor") {
+    fn.bit_xor(fn.col("a"))
+  }
+
   functionTest("mode") {
     fn.mode(fn.col("a"))
   }
@@ -1122,6 +1141,22 @@ class PlanGenerationTestSuite
     fn.regr_syy(fn.col("a"), fn.col("b"))
   }
 
+  test("function every") {
+    boolean.select(fn.every(fn.col("flag")))
+  }
+
+  test("function bool_and") {
+    boolean.select(fn.bool_and(fn.col("flag")))
+  }
+
+  test("function some") {
+    boolean.select(fn.some(fn.col("flag")))
+  }
+
+  test("function bool_or") {
+    boolean.select(fn.bool_or(fn.col("flag")))
+  }
+
   functionTest("array") {
     fn.array("a", "a")
   }
@@ -1184,6 +1219,18 @@ class PlanGenerationTestSuite
 
   functionTest("bitwise_not") {
     fn.bitwise_not(fn.col("a"))
+  }
+
+  functionTest("bit_count") {
+    fn.bit_count(fn.col("a"))
+  }
+
+  functionTest("bit_get") {
+    fn.bit_get(fn.col("a"), lit(0))
+  }
+
+  functionTest("getbit") {
+    fn.getbit(fn.col("a"), lit(0))
   }
 
   functionTest("expr") {
@@ -1874,12 +1921,24 @@ class PlanGenerationTestSuite
     fn.date_add(fn.col("d"), 2)
   }
 
+  temporalFunctionTest("dateadd") {
+    fn.dateadd(fn.col("d"), lit(2))
+  }
+
   temporalFunctionTest("date_sub") {
     fn.date_sub(fn.col("d"), 2)
   }
 
   temporalFunctionTest("datediff") {
     fn.datediff(fn.col("d"), fn.make_date(lit(2020), lit(10), lit(10)))
+  }
+
+  temporalFunctionTest("date_diff") {
+    fn.date_diff(fn.col("d"), fn.make_date(lit(2020), lit(10), lit(10)))
+  }
+
+  temporalFunctionTest("date_from_unix_date") {
+    fn.date_from_unix_date(lit(10))
   }
 
   temporalFunctionTest("year") {
@@ -1900,6 +1959,10 @@ class PlanGenerationTestSuite
 
   temporalFunctionTest("dayofmonth") {
     fn.dayofmonth(fn.col("d"))
+  }
+
+  temporalFunctionTest("day") {
+    fn.day(fn.col("d"))
   }
 
   temporalFunctionTest("dayofyear") {
@@ -2344,7 +2407,63 @@ class PlanGenerationTestSuite
   }
 
   functionTest("to_number") {
-    fn.to_char(fn.col("g"), lit("$99.99"))
+    fn.to_number(fn.col("g"), lit("$99.99"))
+  }
+
+  functionTest("replace") {
+    fn.replace(fn.col("g"), fn.col("g"))
+  }
+
+  functionTest("replace with specified string") {
+    fn.replace(fn.col("g"), fn.col("g"), fn.col("g"))
+  }
+
+  functionTest("split_part") {
+    fn.split_part(fn.col("g"), fn.col("g"), fn.col("a"))
+  }
+
+  functionTest("substr") {
+    fn.substr(fn.col("g"), fn.col("a"))
+  }
+
+  functionTest("substr with len") {
+    fn.substr(fn.col("g"), fn.col("a"), fn.col("a"))
+  }
+
+  functionTest("parse_url") {
+    fn.parse_url(fn.col("g"), fn.col("g"))
+  }
+
+  functionTest("parse_url with key") {
+    fn.parse_url(fn.col("g"), fn.col("g"), fn.col("g"))
+  }
+
+  functionTest("printf") {
+    fn.printf(fn.col("g"), fn.col("a"), fn.col("g"))
+  }
+
+  functionTest("url_decode") {
+    fn.url_decode(fn.col("g"))
+  }
+
+  functionTest("url_encode") {
+    fn.url_encode(fn.col("g"))
+  }
+
+  functionTest("position") {
+    fn.position(fn.col("g"), fn.col("g"))
+  }
+
+  functionTest("position with start") {
+    fn.position(fn.col("g"), fn.col("g"), fn.col("a"))
+  }
+
+  functionTest("endswith") {
+    fn.endswith(fn.col("g"), fn.col("g"))
+  }
+
+  functionTest("startswith") {
+    fn.startswith(fn.col("g"), fn.col("g"))
   }
 
   functionTest("to_timestamp_ltz") {
