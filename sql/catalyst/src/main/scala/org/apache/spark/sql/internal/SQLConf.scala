@@ -321,6 +321,13 @@ object SQLConf {
     .booleanConf
     .createWithDefault(false)
 
+  val ALLOW_NAMED_FUNCTION_ARGUMENTS = buildConf("spark.sql.allowNamedFunctionArguments")
+    .doc("If true, Spark will turn on support for named parameters for all functions that has" +
+      " it implemented.")
+    .version("3.5.0")
+    .booleanConf
+    .createWithDefault(true)
+
   val DYNAMIC_PARTITION_PRUNING_ENABLED =
     buildConf("spark.sql.optimizer.dynamicPartitionPruning.enabled")
       .doc("When true, we will generate predicate for partition column when it's used as join key")
@@ -2172,6 +2179,15 @@ object SQLConf {
       .internal()
       .doc("When true, enable code-gen for FULL OUTER shuffled hash join.")
       .version("3.3.0")
+      .booleanConf
+      .createWithDefault(true)
+
+  val ENABLE_BUILD_SIDE_OUTER_SHUFFLED_HASH_JOIN_CODEGEN =
+    buildConf("spark.sql.codegen.join.buildSideOuterShuffledHashJoin.enabled")
+      .internal()
+      .doc("When true, enable code-gen for an OUTER shuffled hash join where outer side" +
+        " is the build side.")
+      .version("3.5.0")
       .booleanConf
       .createWithDefault(true)
 

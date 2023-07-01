@@ -428,8 +428,8 @@ class Analyzer(override val catalogManager: CatalogManager) extends RuleExecutor
               UnaryMinus(r, mode == EvalMode.ANSI), ansiEnabled = mode == EvalMode.ANSI))
           case (_, CalendarIntervalType | _: DayTimeIntervalType) =>
             Cast(DatetimeSub(l, r, TimeAdd(l, UnaryMinus(r, mode == EvalMode.ANSI))), l.dataType)
-          case _ if AnyTimestampType.unapply(l) || AnyTimestampType.unapply(r) =>
-            SubtractTimestamps(l, r)
+          case _ if AnyTimestampTypeExpression.unapply(l) ||
+            AnyTimestampTypeExpression.unapply(r) => SubtractTimestamps(l, r)
           case (_, DateType) => SubtractDates(l, r)
           case (DateType, dt) if dt != StringType => DateSub(l, r)
           case _ => s
@@ -1787,12 +1787,12 @@ class Analyzer(override val catalogManager: CatalogManager) extends RuleExecutor
       e.references.filter(!_.resolved).foreach { a =>
         // Note: This will throw error only on unresolved attribute issues,
         // not other resolution errors like mismatched data types.
-        val cols = p.inputSet.toSeq.map(_.sql).mkString(", ")
+        val cols = p.inputSet.toSeq.map(attr => toSQLId(attr.name)).mkString(", ")
         a.failAnalysis(
-          errorClass = "_LEGACY_ERROR_TEMP_2309",
+          errorClass = "UNRESOLVED_COLUMN.WITH_SUGGESTION",
           messageParameters = Map(
-            "sqlExpr" -> a.sql,
-            "cols" -> cols))
+            "objectName" -> toSQLId(a.name),
+            "proposal" -> cols))
       }
     }
 
@@ -1897,7 +1897,7 @@ class Analyzer(override val catalogManager: CatalogManager) extends RuleExecutor
           })
         // count(*) has been replaced by count(1)
         case o if containsStar(o.children) =>
-          throw QueryCompilationErrors.invalidStarUsageError(s"expression '${o.prettyName}'",
+          throw QueryCompilationErrors.invalidStarUsageError(s"expression `${o.prettyName}`",
             extractStar(o.children))
       }
     }
@@ -2083,9 +2083,9 @@ class Analyzer(override val catalogManager: CatalogManager) extends RuleExecutor
         // Checks if the number of the aliases is equal to expected one
         if (u.outputNames.size != outputAttrs.size) {
           u.failAnalysis(
-            errorClass = "_LEGACY_ERROR_TEMP_2307",
+            errorClass = "NUM_TABLE_VALUE_ALIASES_MISMATCH",
             messageParameters = Map(
-              "funcName" -> u.name.quoted,
+              "funcName" -> toSQLId(u.name),
               "aliasesNum" -> u.outputNames.size.toString,
               "outColsNum" -> outputAttrs.size.toString))
         }
@@ -2103,7 +2103,7 @@ class Analyzer(override val catalogManager: CatalogManager) extends RuleExecutor
             resolveBuiltinOrTempFunction(nameParts, arguments, Some(u)).map {
               case func: HigherOrderFunction => func
               case other => other.failAnalysis(
-                errorClass = "_LEGACY_ERROR_TEMP_2306",
+                errorClass = "INVALID_LAMBDA_FUNCTION_CALL.NON_HIGHER_ORDER_FUNCTION",
                 messageParameters = Map(
                   "class" -> other.getClass.getCanonicalName))
             }.getOrElse {
