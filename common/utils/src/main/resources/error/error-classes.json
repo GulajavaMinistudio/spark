@@ -1035,6 +1035,11 @@
           "Cannot safely cast <colName> <srcType> to <targetType>."
         ]
       },
+      "EXTRA_COLUMNS" : {
+        "message" : [
+          "Cannot write extra columns <extraColumns>."
+        ]
+      },
       "EXTRA_STRUCT_FIELDS" : {
         "message" : [
           "Cannot write extra fields <extraFields> to the struct <colName>."
@@ -2215,6 +2220,12 @@
     ],
     "sqlState" : "42607"
   },
+  "NON_FOLDABLE_ARGUMENT" : {
+    "message" : [
+      "The function <funcName> requires the parameter <paramName> to be a foldable expression of the type <paramType>, but the actual argument is a non-foldable."
+    ],
+    "sqlState" : "22024"
+  },
   "NON_LAST_MATCHED_CLAUSE_OMIT_CONDITION" : {
     "message" : [
       "When there are more than one MATCHED clauses in a MERGE statement, only the last MATCHED clause can omit the condition."
@@ -2686,6 +2697,18 @@
     "message" : [
       "Failed to analyze the Python user defined table function: <msg>"
     ]
+  },
+  "TABLE_VALUED_FUNCTION_REQUIRED_METADATA_INCOMPATIBLE_WITH_CALL" : {
+    "message" : [
+      "Failed to evaluate the table function <functionName> because its table metadata <requestedMetadata>, but the function call <invalidFunctionCallProperty>."
+    ],
+    "sqlState" : "22023"
+  },
+  "TABLE_VALUED_FUNCTION_REQUIRED_METADATA_INVALID" : {
+    "message" : [
+      "Failed to evaluate the table function <functionName> because its table metadata was invalid; <reason>."
+    ],
+    "sqlState" : "22023"
   },
   "TABLE_VALUED_FUNCTION_TOO_MANY_TABLE_ARGUMENTS" : {
     "message" : [
@@ -4027,11 +4050,6 @@
   "_LEGACY_ERROR_TEMP_1099" : {
     "message" : [
       "<funcName>() doesn't support the <mode> mode. Acceptable modes are <permissiveMode> and <failFastMode>."
-    ]
-  },
-  "_LEGACY_ERROR_TEMP_1100" : {
-    "message" : [
-      "The '<argName>' parameter of function '<funcName>' needs to be a <requiredType> literal."
     ]
   },
   "_LEGACY_ERROR_TEMP_1103" : {

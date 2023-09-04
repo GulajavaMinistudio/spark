@@ -1934,15 +1934,90 @@ class DataFrame(PandasMapOpsMixin, PandasConversionMixin):
         :class:`DataFrame`
             DataFrame with distinct records.
 
+        See Also
+        --------
+        DataFrame.dropDuplicates
+
         Examples
         --------
+        Remove duplicate rows from a DataFrame
+
         >>> df = spark.createDataFrame(
         ...     [(14, "Tom"), (23, "Alice"), (23, "Alice")], ["age", "name"])
+        >>> df.distinct().show()
+        +---+-----+
+        |age| name|
+        +---+-----+
+        | 14|  Tom|
+        | 23|Alice|
+        +---+-----+
 
-        Return the number of distinct rows in the :class:`DataFrame`
+        Count the number of distinct rows in a DataFrame
 
         >>> df.distinct().count()
         2
+
+        Get distinct rows from a DataFrame with multiple columns
+
+        >>> df = spark.createDataFrame(
+        ...     [(14, "Tom", "M"), (23, "Alice", "F"), (23, "Alice", "F"), (14, "Tom", "M")],
+        ...     ["age", "name", "gender"])
+        >>> df.distinct().show()
+        +---+-----+------+
+        |age| name|gender|
+        +---+-----+------+
+        | 14|  Tom|     M|
+        | 23|Alice|     F|
+        +---+-----+------+
+
+        Get distinct values from a specific column in a DataFrame
+
+        >>> df.select("name").distinct().show()
+        +-----+
+        | name|
+        +-----+
+        |  Tom|
+        |Alice|
+        +-----+
+
+        Count the number of distinct values in a specific column
+
+        >>> df.select("name").distinct().count()
+        2
+
+        Get distinct values from multiple columns in DataFrame
+
+        >>> df.select("name", "gender").distinct().show()
+        +-----+------+
+        | name|gender|
+        +-----+------+
+        |  Tom|     M|
+        |Alice|     F|
+        +-----+------+
+
+        Get distinct rows from a DataFrame with null values
+
+        >>> df = spark.createDataFrame(
+        ...     [(14, "Tom", "M"), (23, "Alice", "F"), (23, "Alice", "F"), (14, "Tom", None)],
+        ...     ["age", "name", "gender"])
+        >>> df.distinct().show()
+        +---+-----+------+
+        |age| name|gender|
+        +---+-----+------+
+        | 14|  Tom|     M|
+        | 23|Alice|     F|
+        | 14|  Tom|  NULL|
+        +---+-----+------+
+
+        Get distinct non-null values from a DataFrame
+
+        >>> df.distinct().filter(df.gender.isNotNull()).show()
+        +---+-----+------+
+        |age| name|gender|
+        +---+-----+------+
+        | 14|  Tom|     M|
+        | 23|Alice|     F|
+        +---+-----+------+
         """
         return DataFrame(self._jdf.distinct(), self.sparkSession)
 
@@ -3361,48 +3436,145 @@ class DataFrame(PandasMapOpsMixin, PandasConversionMixin):
         Parameters
         ----------
         condition : :class:`Column` or str
-            a :class:`Column` of :class:`types.BooleanType`
+            A :class:`Column` of :class:`types.BooleanType`
             or a string of SQL expressions.
 
         Returns
         -------
         :class:`DataFrame`
-            Filtered DataFrame.
+            A new DataFrame with rows that satisfy the condition.
 
         Examples
         --------
         >>> df = spark.createDataFrame([
-        ...     (2, "Alice"), (5, "Bob")], schema=["age", "name"])
+        ...     (2, "Alice", "Math"), (5, "Bob", "Physics"), (7, "Charlie", "Chemistry")],
+        ...     schema=["age", "name", "subject"])
 
         Filter by :class:`Column` instances.
 
         >>> df.filter(df.age > 3).show()
-        +---+----+
-        |age|name|
-        +---+----+
-        |  5| Bob|
-        +---+----+
+        +---+-------+---------+
+        |age|   name|  subject|
+        +---+-------+---------+
+        |  5|    Bob|  Physics|
+        |  7|Charlie|Chemistry|
+        +---+-------+---------+
         >>> df.where(df.age == 2).show()
-        +---+-----+
-        |age| name|
-        +---+-----+
-        |  2|Alice|
-        +---+-----+
+        +---+-----+-------+
+        |age| name|subject|
+        +---+-----+-------+
+        |  2|Alice|   Math|
+        +---+-----+-------+
 
         Filter by SQL expression in a string.
 
         >>> df.filter("age > 3").show()
-        +---+----+
-        |age|name|
-        +---+----+
-        |  5| Bob|
-        +---+----+
+        +---+-------+---------+
+        |age|   name|  subject|
+        +---+-------+---------+
+        |  5|    Bob|  Physics|
+        |  7|Charlie|Chemistry|
+        +---+-------+---------+
         >>> df.where("age = 2").show()
-        +---+-----+
-        |age| name|
-        +---+-----+
-        |  2|Alice|
-        +---+-----+
+        +---+-----+-------+
+        |age| name|subject|
+        +---+-----+-------+
+        |  2|Alice|   Math|
+        +---+-----+-------+
+
+        Filter by multiple conditions.
+
+        >>> df.filter((df.age > 3) & (df.subject == "Physics")).show()
+        +---+----+-------+
+        |age|name|subject|
+        +---+----+-------+
+        |  5| Bob|Physics|
+        +---+----+-------+
+        >>> df.filter((df.age == 2) | (df.subject == "Chemistry")).show()
+        +---+-------+---------+
+        |age|   name|  subject|
+        +---+-------+---------+
+        |  2|  Alice|     Math|
+        |  7|Charlie|Chemistry|
+        +---+-------+---------+
+
+        Filter by multiple conditions using SQL expression.
+
+        >>> df.filter("age > 3 AND name = 'Bob'").show()
+        +---+----+-------+
+        |age|name|subject|
+        +---+----+-------+
+        |  5| Bob|Physics|
+        +---+----+-------+
+
+        Filter using the :func:`Column.isin` function.
+
+        >>> df.filter(df.name.isin("Alice", "Bob")).show()
+        +---+-----+-------+
+        |age| name|subject|
+        +---+-----+-------+
+        |  2|Alice|   Math|
+        |  5|  Bob|Physics|
+        +---+-----+-------+
+
+        Filter by a list of values using the :func:`Column.isin` function.
+
+        >>> df.filter(df.subject.isin(["Math", "Physics"])).show()
+        +---+-----+-------+
+        |age| name|subject|
+        +---+-----+-------+
+        |  2|Alice|   Math|
+        |  5|  Bob|Physics|
+        +---+-----+-------+
+
+        Filter using the `~` operator to exclude certain values.
+
+        >>> df.filter(~df.name.isin(["Alice", "Charlie"])).show()
+        +---+----+-------+
+        |age|name|subject|
+        +---+----+-------+
+        |  5| Bob|Physics|
+        +---+----+-------+
+
+        Filter using the :func:`Column.isNotNull` function.
+
+        >>> df.filter(df.name.isNotNull()).show()
+        +---+-------+---------+
+        |age|   name|  subject|
+        +---+-------+---------+
+        |  2|  Alice|     Math|
+        |  5|    Bob|  Physics|
+        |  7|Charlie|Chemistry|
+        +---+-------+---------+
+
+        Filter using the :func:`Column.like` function.
+
+        >>> df.filter(df.name.like("Al%")).show()
+        +---+-----+-------+
+        |age| name|subject|
+        +---+-----+-------+
+        |  2|Alice|   Math|
+        +---+-----+-------+
+
+        Filter using the :func:`Column.contains` function.
+
+        >>> df.filter(df.name.contains("i")).show()
+        +---+-------+---------+
+        |age|   name|  subject|
+        +---+-------+---------+
+        |  2|  Alice|     Math|
+        |  7|Charlie|Chemistry|
+        +---+-------+---------+
+
+        Filter using the :func:`Column.between` function.
+
+        >>> df.filter(df.age.between(2, 5)).show()
+        +---+-----+-------+
+        |age| name|subject|
+        +---+-----+-------+
+        |  2|Alice|   Math|
+        |  5|  Bob|Physics|
+        +---+-----+-------+
         """
         if isinstance(condition, str):
             jdf = self._jdf.filter(condition)
@@ -5416,7 +5588,8 @@ class DataFrame(PandasMapOpsMixin, PandasConversionMixin):
         ...
 
     def drop(self, *cols: "ColumnOrName") -> "DataFrame":  # type: ignore[misc]
-        """Returns a new :class:`DataFrame` without specified columns.
+        """
+        Returns a new :class:`DataFrame` without specified columns.
         This is a no-op if the schema doesn't contain the given column name(s).
 
         .. versionadded:: 1.4.0
@@ -5427,28 +5600,26 @@ class DataFrame(PandasMapOpsMixin, PandasConversionMixin):
         Parameters
         ----------
         cols: str or :class:`Column`
-            a name of the column, or the :class:`Column` to drop
+            A name of the column, or the :class:`Column` to be dropped.
 
         Returns
         -------
         :class:`DataFrame`
-            DataFrame without given columns.
+            A new :class:`DataFrame` without the specified columns.
 
         Notes
         -----
-        When an input is a column name, it is treated literally without further interpretation.
-        Otherwise, will try to match the equivalent expression.
-        So that dropping column by its name `drop(colName)` has different semantic with directly
-        dropping the column `drop(col(colName))`.
+        - When an input is a column name, it is treated literally without further interpretation.
+          Otherwise, it will try to match the equivalent expression.
+          So dropping a column by its name `drop(colName)` has a different semantic
+          with directly dropping the column `drop(col(colName))`.
 
         Examples
         --------
-        >>> from pyspark.sql import Row
-        >>> from pyspark.sql.functions import col, lit
+        Example 1: Drop a column by name.
+
         >>> df = spark.createDataFrame(
         ...     [(14, "Tom"), (23, "Alice"), (16, "Bob")], ["age", "name"])
-        >>> df2 = spark.createDataFrame([Row(height=80, name="Tom"), Row(height=85, name="Bob")])
-
         >>> df.drop('age').show()
         +-----+
         | name|
@@ -5457,6 +5628,9 @@ class DataFrame(PandasMapOpsMixin, PandasConversionMixin):
         |Alice|
         |  Bob|
         +-----+
+
+        Example 2: Drop a column by :class:`Column` object.
+
         >>> df.drop(df.age).show()
         +-----+
         | name|
@@ -5466,9 +5640,10 @@ class DataFrame(PandasMapOpsMixin, PandasConversionMixin):
         |  Bob|
         +-----+
 
-        Drop the column that joined both DataFrames on.
+        Example 3: Drop the column that joined both DataFrames on.
 
-        >>> df.join(df2, df.name == df2.name, 'inner').drop('name').sort('age').show()
+        >>> df2 = spark.createDataFrame([(80, "Tom"), (85, "Bob")], ["height", "name"])
+        >>> df.join(df2, df.name == df2.name).drop('name').sort('age').show()
         +---+------+
         |age|height|
         +---+------+
@@ -5489,7 +5664,7 @@ class DataFrame(PandasMapOpsMixin, PandasConversionMixin):
         | 16|  Bob|    85| Bob|
         +---+-----+------+----+
 
-        Drop two column by the same name.
+        Example 4: Drop two column by the same name.
 
         >>> df3.drop("name").show()
         +---+------+
@@ -5503,14 +5678,18 @@ class DataFrame(PandasMapOpsMixin, PandasConversionMixin):
         | 16|    85|
         +---+------+
 
-        Can not drop col('name') due to ambiguous reference.
+        Example 5: Can not drop col('name') due to ambiguous reference.
 
-        >>> df3.drop(col("name")).show()
+        >>> from pyspark.sql import functions as sf
+        >>> df3.drop(sf.col("name")).show()
         Traceback (most recent call last):
         ...
         pyspark.errors.exceptions.captured.AnalysisException: [AMBIGUOUS_REFERENCE] Reference...
 
-        >>> df4 = df.withColumn("a.b.c", lit(1))
+        Example 6: Can not find a column matching the expression "a.b.c".
+
+        >>> from pyspark.sql import functions as sf
+        >>> df4 = df.withColumn("a.b.c", sf.lit(1))
         >>> df4.show()
         +---+-----+-----+
         |age| name|a.b.c|
@@ -5529,9 +5708,7 @@ class DataFrame(PandasMapOpsMixin, PandasConversionMixin):
         | 16|  Bob|
         +---+-----+
 
-        Can not find a column matching the expression "a.b.c".
-
-        >>> df4.drop(col("a.b.c")).show()
+        >>> df4.drop(sf.col("a.b.c")).show()
         +---+-----+-----+
         |age| name|a.b.c|
         +---+-----+-----+

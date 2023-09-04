@@ -1305,6 +1305,12 @@ Cannot call function `<functionName>` because named argument references are not 
 
 It is not allowed to use an aggregate function in the argument of another aggregate function. Please use the inner aggregate function in a sub-query.
 
+### NON_FOLDABLE_ARGUMENT
+
+[SQLSTATE: 22024](sql-error-conditions-sqlstates.html#class-22-data-exception)
+
+The function `<funcName>` requires the parameter `<paramName>` to be a foldable expression of the type `<paramType>`, but the actual argument is a non-foldable.
+
 ### NON_LAST_MATCHED_CLAUSE_OMIT_CONDITION
 
 [SQLSTATE: 42613](sql-error-conditions-sqlstates.html#class-42-syntax-error-or-access-rule-violation)
@@ -1757,6 +1763,18 @@ To tolerate the error on drop use DROP VIEW IF EXISTS or DROP TABLE IF EXISTS.
 SQLSTATE: none assigned
 
 Failed to analyze the Python user defined table function: `<msg>`
+
+### TABLE_VALUED_FUNCTION_REQUIRED_METADATA_INCOMPATIBLE_WITH_CALL
+
+[SQLSTATE: 22023](sql-error-conditions-sqlstates.html#class-22-data-exception)
+
+Failed to evaluate the table function `<functionName>` because its table metadata `<requestedMetadata>`, but the function call `<invalidFunctionCallProperty>`.
+
+### TABLE_VALUED_FUNCTION_REQUIRED_METADATA_INVALID
+
+[SQLSTATE: 22023](sql-error-conditions-sqlstates.html#class-22-data-exception)
+
+Failed to evaluate the table function `<functionName>` because its table metadata was invalid; `<reason>`.
 
 ### TABLE_VALUED_FUNCTION_TOO_MANY_TABLE_ARGUMENTS
 
