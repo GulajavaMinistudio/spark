@@ -21,12 +21,11 @@ import java.nio.file.Files
 import java.time.DateTimeException
 import java.util.Properties
 
-import scala.collection.JavaConverters._
 import scala.collection.mutable
+import scala.jdk.CollectionConverters._
 
 import org.apache.commons.io.FileUtils
 import org.apache.commons.io.output.TeeOutputStream
-import org.apache.commons.lang3.{JavaVersion, SystemUtils}
 import org.scalactic.TolerantNumerics
 import org.scalatest.PrivateMethodTester
 
@@ -410,18 +409,16 @@ class ClientE2ETestSuite extends RemoteSparkSession with SQLHelper with PrivateM
 
   test("write jdbc") {
     assume(IntegrationTestUtils.isSparkHiveJarAvailable)
-    if (SystemUtils.isJavaVersionAtLeast(JavaVersion.JAVA_9)) {
-      val url = "jdbc:derby:memory:1234"
-      val table = "t1"
-      try {
-        spark.range(10).write.jdbc(url = s"$url;create=true", table, new Properties())
-        val result = spark.read.jdbc(url = url, table, new Properties()).collect()
-        assert(result.length == 10)
-      } finally {
-        // clean up
-        assertThrows[SparkException] {
-          spark.read.jdbc(url = s"$url;drop=true", table, new Properties()).collect()
-        }
+    val url = "jdbc:derby:memory:1234"
+    val table = "t1"
+    try {
+      spark.range(10).write.jdbc(url = s"$url;create=true", table, new Properties())
+      val result = spark.read.jdbc(url = url, table, new Properties()).collect()
+      assert(result.length == 10)
+    } finally {
+      // clean up
+      assertThrows[SparkException] {
+        spark.read.jdbc(url = s"$url;drop=true", table, new Properties()).collect()
       }
     }
   }
