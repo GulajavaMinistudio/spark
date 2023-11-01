@@ -69,7 +69,7 @@ abstract class MemoryStreamBase[A : Encoder](sqlContext: SQLContext) extends Spa
   }
 
   def addData(data: A*): OffsetV2 = {
-    addData(data.toTraversable)
+    addData(data)
   }
 
   def addData(data: IterableOnce[A]): OffsetV2
@@ -279,7 +279,7 @@ case class MemoryStream[A : Encoder](
         s"Offsets committed out of order: $lastOffsetCommitted followed by $end")
     }
 
-    batches.trimStart(offsetDiff)
+    batches.dropInPlace(offsetDiff)
     lastOffsetCommitted = newOffset
   }
 
