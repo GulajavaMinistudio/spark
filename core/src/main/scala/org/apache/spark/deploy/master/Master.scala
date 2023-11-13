@@ -41,6 +41,7 @@ import org.apache.spark.resource.{ResourceProfile, ResourceRequirement, Resource
 import org.apache.spark.rpc._
 import org.apache.spark.serializer.{JavaSerializer, Serializer}
 import org.apache.spark.util.{SparkUncaughtExceptionHandler, ThreadUtils, Utils}
+import org.apache.spark.util.ArrayImplicits._
 
 private[deploy] class Master(
     override val rpcEnv: RpcEnv,
@@ -120,6 +121,7 @@ private[deploy] class Master(
   private val defaultCores = conf.get(DEFAULT_CORES)
   val reverseProxy = conf.get(UI_REVERSE_PROXY)
   val historyServerUrl = conf.get(MASTER_UI_HISTORY_SERVER_URL)
+  val useAppNameAsAppId = conf.get(MASTER_USE_APP_NAME_AS_APP_ID)
 
   // Alternative application submission gateway that is stable across Spark versions
   private val restServerEnabled = conf.get(MASTER_REST_SERVER_ENABLED)
@@ -276,7 +278,8 @@ private[deploy] class Master(
       } else if (idToWorker.contains(id)) {
         workerRef.send(RegisteredWorker(self, masterWebUiUrl, masterAddress, true))
       } else {
-        val workerResources = resources.map(r => r._1 -> WorkerResourceInfo(r._1, r._2.addresses))
+        val workerResources =
+          resources.map(r => r._1 -> WorkerResourceInfo(r._1, r._2.addresses.toImmutableArraySeq))
         val worker = new WorkerInfo(id, workerHost, workerPort, cores, memory,
           workerRef, workerWebUiUrl, workerResources)
         if (registerWorker(worker)) {
@@ -1041,7 +1044,11 @@ private[deploy] class Master(
       ApplicationInfo = {
     val now = System.currentTimeMillis()
     val date = new Date(now)
-    val appId = newApplicationId(date)
+    val appId = if (useAppNameAsAppId) {
+      desc.name.toLowerCase().replaceAll("\\s+", "")
+    } else {
+      newApplicationId(date)
+    }
     new ApplicationInfo(now, appId, desc, date, driver, defaultCores)
   }
 
