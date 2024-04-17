@@ -37,7 +37,10 @@ import org.apache.spark.util.SparkClassUtils
  * The values of the MDC will be inline in the log message, while the key-value pairs will be
  * part of the ThreadContext.
  */
-case class MDC(key: LogKey, value: Any)
+case class MDC(key: LogKey, value: Any) {
+  require(!value.isInstanceOf[MessageWithContext],
+    "the class of value cannot be MessageWithContext")
+}
 
 /**
  * Wrapper class for log messages that include a logging context.
@@ -49,6 +52,8 @@ case class MessageWithContext(message: String, context: java.util.HashMap[String
     resultMap.putAll(mdc.context)
     MessageWithContext(message + mdc.message, resultMap)
   }
+
+  def stripMargin: MessageWithContext = copy(message = message.stripMargin)
 }
 
 /**
@@ -103,9 +108,10 @@ trait Logging {
       val context = new java.util.HashMap[String, String]()
 
       args.foreach { mdc =>
-        sb.append(mdc.value.toString)
+        val value = if (mdc.value != null) mdc.value.toString else null
+        sb.append(value)
         if (Logging.isStructuredLoggingEnabled) {
-          context.put(mdc.key.toString.toLowerCase(Locale.ROOT), mdc.value.toString)
+          context.put(mdc.key.toString.toLowerCase(Locale.ROOT), value)
         }
 
         if (processedParts.hasNext) {
@@ -117,7 +123,7 @@ trait Logging {
     }
   }
 
-  private def withLogContext(context: java.util.HashMap[String, String])(body: => Unit): Unit = {
+  protected def withLogContext(context: java.util.HashMap[String, String])(body: => Unit): Unit = {
     val threadContext = CloseableThreadContext.putAll(context)
     try {
       body
@@ -151,8 +157,40 @@ trait Logging {
     if (log.isDebugEnabled) log.debug(msg)
   }
 
+  protected def logDebug(entry: LogEntry): Unit = {
+    if (log.isDebugEnabled) {
+      withLogContext(entry.context) {
+        log.debug(entry.message)
+      }
+    }
+  }
+
+  protected def logDebug(entry: LogEntry, throwable: Throwable): Unit = {
+    if (log.isDebugEnabled) {
+      withLogContext(entry.context) {
+        log.debug(entry.message, throwable)
+      }
+    }
+  }
+
   protected def logTrace(msg: => String): Unit = {
     if (log.isTraceEnabled) log.trace(msg)
+  }
+
+  protected def logTrace(entry: LogEntry): Unit = {
+    if (log.isTraceEnabled) {
+      withLogContext(entry.context) {
+        log.trace(entry.message)
+      }
+    }
+  }
+
+  protected def logTrace(entry: LogEntry, throwable: Throwable): Unit = {
+    if (log.isTraceEnabled) {
+      withLogContext(entry.context) {
+        log.trace(entry.message, throwable)
+      }
+    }
   }
 
   protected def logWarning(msg: => String): Unit = {
