@@ -49,6 +49,7 @@ import pyarrow as pa
 import json
 import warnings
 from collections.abc import Iterable
+from functools import cached_property
 
 from pyspark import _NoValue
 from pyspark._globals import _NoValueType
@@ -73,7 +74,7 @@ from pyspark.sql.connect.conversion import ArrowTableToRowsConversion
 from pyspark.sql.connect.group import GroupedData
 from pyspark.sql.connect.readwriter import DataFrameWriter, DataFrameWriterV2
 from pyspark.sql.connect.streaming.readwriter import DataStreamWriter
-from pyspark.sql.connect.column import Column
+from pyspark.sql.column import Column
 from pyspark.sql.connect.expressions import (
     ColumnReference,
     UnresolvedRegex,
@@ -255,12 +256,14 @@ class DataFrame(ParentDataFrame):
         return DataFrame(plan.SubqueryAlias(self._plan, alias), session=self._session)
 
     def colRegex(self, colName: str) -> Column:
+        from pyspark.sql.connect.column import Column as ConnectColumn
+
         if not isinstance(colName, str):
             raise PySparkTypeError(
                 error_class="NOT_STR",
                 message_parameters={"arg_name": "colName", "arg_type": type(colName).__name__},
             )
-        return Column(UnresolvedRegex(colName, self._plan._plan_id))
+        return ConnectColumn(UnresolvedRegex(colName, self._plan._plan_id))
 
     @property
     def dtypes(self) -> List[Tuple[str, str]]:
@@ -750,7 +753,7 @@ class DataFrame(ParentDataFrame):
             session=self._session,
         )
 
-    orderBy = sort  # type: ignore[assignment]
+    orderBy = sort
 
     def sortWithinPartitions(
         self,
@@ -959,7 +962,7 @@ class DataFrame(ParentDataFrame):
             self._session,
         )
 
-    melt = unpivot  # type: ignore[assignment]
+    melt = unpivot
 
     def withWatermark(self, eventTime: str, delayThreshold: str) -> ParentDataFrame:
         # TODO: reuse error handling code in sql.DataFrame.withWatermark()
@@ -1703,9 +1706,11 @@ class DataFrame(ParentDataFrame):
     def __getitem__(
         self, item: Union[int, str, Column, List, Tuple]
     ) -> Union[Column, ParentDataFrame]:
+        from pyspark.sql.connect.column import Column as ConnectColumn
+
         if isinstance(item, str):
             if item == "*":
-                return Column(
+                return ConnectColumn(
                     UnresolvedStar(
                         unparsed_target=None,
                         plan_id=self._plan._plan_id,
@@ -1716,7 +1721,7 @@ class DataFrame(ParentDataFrame):
                 # if (sparkSession.sessionState.conf.supportQuotedRegexColumnName) {
                 #   colRegex(colName)
                 # } else {
-                #   Column(addDataFrameIdToCol(resolve(colName)))
+                #   ConnectColumn(addDataFrameIdToCol(resolve(colName)))
                 # }
 
                 # validate the column name
@@ -1742,7 +1747,9 @@ class DataFrame(ParentDataFrame):
             )
 
     def _col(self, name: str) -> Column:
-        return Column(
+        from pyspark.sql.connect.column import Column as ConnectColumn
+
+        return ConnectColumn(
             ColumnReference(
                 unparsed_identifier=name,
                 plan_id=self._plan._plan_id,
@@ -1791,7 +1798,7 @@ class DataFrame(ParentDataFrame):
         assert result is not None
         return result
 
-    @property
+    @cached_property
     def isStreaming(self) -> bool:
         query = self._plan.to_proto(self._session.client)
         result = self._session.client._analyze(method="is_streaming", plan=query).is_streaming
@@ -2037,9 +2044,7 @@ class DataFrame(ParentDataFrame):
         def foreach_func(row: Any) -> None:
             f(row)
 
-        self.select(  # type: ignore[call-overload]
-            F.struct(*self.schema.fieldNames()).alias("row")
-        ).select(
+        self.select(F.struct(*self.schema.fieldNames()).alias("row")).select(
             F.udf(foreach_func, StructType())("row")  # type: ignore[arg-type]
         ).collect()
 

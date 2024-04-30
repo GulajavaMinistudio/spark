@@ -40,7 +40,6 @@ from typing import (
 
 from pyspark.conf import SparkConf
 from pyspark.util import is_remote_only
-from pyspark.sql.column import _to_java_column
 from pyspark.sql.conf import RuntimeConfig
 from pyspark.sql.dataframe import DataFrame
 from pyspark.sql.functions import lit
@@ -143,6 +142,9 @@ def _monkey_patch_RDD(sparkSession: "SparkSession") -> None:
 #
 # @classmethod + @property is also affected by a bug in Python's docstring which was backported
 # to Python 3.9.6 (https://github.com/python/cpython/pull/28838)
+#
+# Python 3.9 with MyPy complains about @classmethod + @property combination. We should fix
+# it together with MyPy.
 class classproperty(property):
     """Same as Python's @property decorator, but for class attributes.
 
@@ -1724,6 +1726,7 @@ class SparkSession(SparkConversionMixin):
         |  3|  6|  1|
         +---+---+---+
         """
+        from pyspark.sql.classic.column import _to_java_column
 
         formatter = SQLStringFormatter(self)
         if len(kwargs) > 0:
