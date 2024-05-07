@@ -76,24 +76,37 @@ jobs:
       id: set-outputs
       run: |
         if [ -z "${{ inputs.jobs }}" ]; then
-          pyspark=true; sparkr=true;
           pyspark_modules=`cd dev && python -c "import sparktestsupport.modules as m; print(','.join(m.name for m in m.all_modules if m.name.startswith('pyspark')))"`
           pyspark=`./dev/is-changed.py -m $pyspark_modules`
-          sparkr=`./dev/is-changed.py -m sparkr`
-          kubernetes=`./dev/is-changed.py -m kubernetes`
-          # 'build' is always true for now.
-          # It does not save significant time and most of PRs trigger the build.
+          if [[ "${{ github.repository }}" != 'apache/spark' ]]; then
+            pandas=$pyspark
+            yarn=`./dev/is-changed.py -m yarn`
+            kubernetes=`./dev/is-changed.py -m kubernetes`
+            sparkr=`./dev/is-changed.py -m sparkr`
+            buf=true
+            ui=true
+          else
+            pandas=false
+            yarn=false
+            kubernetes=false
+            sparkr=false
+            buf=false
+            ui=false
+          fi
+          build=`./dev/is-changed.py -m "core,unsafe,kvstore,avro,utils,network-common,network-shuffle,repl,launcher,examples,sketch,variant,api,catalyst,hive-thriftserver,mllib-local,mllib,graphx,streaming,sql-kafka-0-10,streaming-kafka-0-10,streaming-kinesis-asl,kubernetes,hadoop-cloud,spark-ganglia-lgpl,protobuf,yarn,connect,sql,hive"`
           precondition="
             {
-              \"build\": \"true\",
+              \"build\": \"$build\",
               \"pyspark\": \"$pyspark\",
+              \"pyspark-pandas\": \"$pandas\",
               \"sparkr\": \"$sparkr\",
               \"tpcds-1g\": \"false\",
               \"docker-integration-tests\": \"false\",
               \"lint\" : \"true\",
+              \"yarn\" : \"$yarn\",
               \"k8s-integration-tests\" : \"$kubernetes\",
-              \"buf\" : \"true\",
-              \"ui\" : \"true\",
+              \"buf\" : \"$buf\",
+              \"ui\" : \"$ui\",
             }"
           echo $precondition # For debugging
           # Remove `\n` to avoid "Invalid format" error
@@ -144,8 +157,8 @@ jobs:
           - >-
             streaming, sql-kafka-0-10, streaming-kafka-0-10, streaming-kinesis-asl,
             kubernetes, hadoop-cloud, spark-ganglia-lgpl, protobuf
-          - >-
-            yarn, connect
+          - yarn
+          - connect
         # Here, we split Hive and SQL tests into some of slow ones and the rest of them.
         included-tags: [""]
         excluded-tags: [""]
@@ -183,6 +196,11 @@ jobs:
             hive: hive2.3
             excluded-tags: org.apache.spark.tags.ExtendedSQLTest,org.apache.spark.tags.SlowSQLTest
             comment: "- other tests"
+        exclude:
+          # Always run if yarn == 'true', even infra-image is skip (such as non-master job)
+          # In practice, the build will run in individual PR, but not against the individual commit
+          # in Apache Spark repository.
+          - modules: ${{ fromJson(needs.precondition.outputs.required).yarn != 'true' && 'yarn' }}
     env:
       MODULES_TO_TEST: ${{ matrix.modules }}
       EXCLUDED_TAGS: ${{ matrix.excluded-tags }}
@@ -348,11 +366,11 @@ jobs:
           - >-
             pyspark-mllib, pyspark-ml, pyspark-ml-connect
           - >-
+            pyspark-connect
+          - >-
             pyspark-pandas
           - >-
             pyspark-pandas-slow
-          - >-
-            pyspark-connect
           - >-
             pyspark-pandas-connect-part0
           - >-
@@ -361,6 +379,16 @@ jobs:
             pyspark-pandas-connect-part2
           - >-
             pyspark-pandas-connect-part3
+        exclude:
+          # Always run if pyspark-pandas == 'true', even infra-image is skip (such as non-master job)
+          # In practice, the build will run in individual PR, but not against the individual commit
+          # in Apache Spark repository.
+          - modules: ${{ fromJson(needs.precondition.outputs.required).pyspark-pandas != 'true' && 'pyspark-pandas' }}
+          - modules: ${{ fromJson(needs.precondition.outputs.required).pyspark-pandas != 'true' && 'pyspark-pandas-slow' }}
+          - modules: ${{ fromJson(needs.precondition.outputs.required).pyspark-pandas != 'true' && 'pyspark-pandas-connect-part0' }}
+          - modules: ${{ fromJson(needs.precondition.outputs.required).pyspark-pandas != 'true' && 'pyspark-pandas-connect-part1' }}
+          - modules: ${{ fromJson(needs.precondition.outputs.required).pyspark-pandas != 'true' && 'pyspark-pandas-connect-part2' }}
+          - modules: ${{ fromJson(needs.precondition.outputs.required).pyspark-pandas != 'true' && 'pyspark-pandas-connect-part3' }}
     env:
       MODULES_TO_TEST: ${{ matrix.modules }}
       PYTHON_TO_TEST: 'python3.11'
@@ -900,7 +928,6 @@ jobs:
       HIVE_PROFILE: hive2.3
       GITHUB_PREV_SHA: ${{ github.event.before }}
       SPARK_LOCAL_IP: localhost
-      ORACLE_DOCKER_IMAGE_NAME: gvenzl/oracle-free:23.3
       SKIP_UNIDOC: true
       SKIP_MIMA: true
       SKIP_PACKAGING: true
@@ -1020,6 +1047,11 @@ jobs:
           minikube mount ${PVC_TESTS_HOST_PATH}:${PVC_TESTS_VM_PATH} --gid=0 --uid=185 &
           kubectl create clusterrolebinding serviceaccounts-cluster-admin --clusterrole=cluster-admin --group=system:serviceaccounts || true
           kubectl apply -f https://raw.githubusercontent.com/volcano-sh/volcano/v1.8.2/installer/volcano-development.yaml || true
+          if [[ "${{ inputs.branch }}" == 'branch-3.5' || "${{ inputs.branch }}" == 'branch-3.4' ]]; then
+            kubectl apply -f https://raw.githubusercontent.com/volcano-sh/volcano/v1.7.0/installer/volcano-development.yaml || true
+          else
+            kubectl apply -f https://raw.githubusercontent.com/volcano-sh/volcano/v1.8.2/installer/volcano-development.yaml || true
+          fi
           eval $(minikube docker-env)
           build/sbt -Phadoop-3 -Psparkr -Pkubernetes -Pvolcano -Pkubernetes-integration-tests -Dspark.kubernetes.test.volcanoMaxConcurrencyJobNum=1 -Dtest.exclude.tags=local "kubernetes-integration-tests/test"
       - name: Upload Spark on K8S integration tests log files
