@@ -548,6 +548,50 @@ class CollationSQLExpressionsSuite
     })
   }
 
+  test("Support XPath expressions with collation") {
+    case class XPathTestCase(
+      xml: String,
+      xpath: String,
+      functionName: String,
+      collationName: String,
+      result: Any,
+      resultType: DataType
+    )
+
+    val testCases = Seq(
+      XPathTestCase("<a><b>1</b></a>", "a/b",
+        "xpath_boolean", "UTF8_BINARY", true, BooleanType),
+      XPathTestCase("<A><B>1</B><B>2</B></A>", "sum(A/B)",
+        "xpath_short", "UTF8_BINARY", 3, ShortType),
+      XPathTestCase("<a><b>3</b><b>4</b></a>", "sum(a/b)",
+        "xpath_int", "UTF8_BINARY_LCASE", 7, IntegerType),
+      XPathTestCase("<A><B>5</B><B>6</B></A>", "sum(A/B)",
+        "xpath_long", "UTF8_BINARY_LCASE", 11, LongType),
+      XPathTestCase("<a><b>7</b><b>8</b></a>", "sum(a/b)",
+        "xpath_float", "UNICODE", 15.0, FloatType),
+      XPathTestCase("<A><B>9</B><B>0</B></A>", "sum(A/B)",
+        "xpath_double", "UNICODE", 9.0, DoubleType),
+      XPathTestCase("<a><b>b</b><c>cc</c></a>", "a/c",
+        "xpath_string", "UNICODE_CI", "cc", StringType("UNICODE_CI")),
+      XPathTestCase("<a><b>b1</b><b>b2</b><b>b3</b><c>c1</c><c>c2</c></a>", "a/b/text()",
+        "xpath", "UNICODE_CI", Array("b1", "b2", "b3"), ArrayType(StringType("UNICODE_CI")))
+    )
+
+    // Supported collations
+    testCases.foreach(t => {
+      val query =
+        s"""
+           |select ${t.functionName}('${t.xml}', '${t.xpath}')
+           |""".stripMargin
+      // Result & data type
+      withSQLConf(SqlApiConf.DEFAULT_COLLATION -> t.collationName) {
+        val testQuery = sql(query)
+        checkAnswer(testQuery, Row(t.result))
+        assert(testQuery.schema.fields.head.dataType.sameType(t.resultType))
+      }
+    })
+  }
+
   test("Support StringSpace expression with collation") {
     case class StringSpaceTestCase(
       input: Int,
@@ -928,6 +972,142 @@ class CollationSQLExpressionsSuite
       checkAnswer(sql(query), Row(t.result))
       val dataType = MapType(StringType(t.c), StringType(t.c), true)
       assert(sql(query).schema.fields.head.dataType.sameType(dataType))
+    })
+  }
+
+  test("Support RaiseError misc expression with collation") {
+    // Supported collations
+    case class RaiseErrorTestCase(errorMessage: String, collationName: String)
+    val testCases = Seq(
+      RaiseErrorTestCase("custom error message 1", "UTF8_BINARY"),
+      RaiseErrorTestCase("custom error message 2", "UTF8_BINARY_LCASE"),
+      RaiseErrorTestCase("custom error message 3", "UNICODE"),
+      RaiseErrorTestCase("custom error message 4", "UNICODE_CI")
+    )
+    testCases.foreach(t => {
+      withSQLConf(SqlApiConf.DEFAULT_COLLATION -> t.collationName) {
+        val query = s"SELECT raise_error('${t.errorMessage}')"
+        // Result & data type
+        val userException = intercept[SparkRuntimeException] {
+          sql(query).collect()
+        }
+        assert(userException.getErrorClass === "USER_RAISED_EXCEPTION")
+        assert(userException.getMessage.contains(t.errorMessage))
+      }
+    })
+  }
+
+  test("Support Uuid misc expression with collation") {
+    // Supported collations
+    Seq("UTF8_BINARY_LCASE", "UNICODE", "UNICODE_CI").foreach(collationName =>
+      withSQLConf(SqlApiConf.DEFAULT_COLLATION -> collationName) {
+        val query = s"SELECT uuid()"
+        // Result & data type
+        val testQuery = sql(query)
+        val queryResult = testQuery.collect().head.getString(0)
+        val uuidFormat = "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+        assert(queryResult.matches(uuidFormat))
+        val dataType = StringType(collationName)
+        assert(testQuery.schema.fields.head.dataType.sameType(dataType))
+      }
+    )
+  }
+
+  test("Support SparkVersion misc expression with collation") {
+    // Supported collations
+    Seq("UTF8_BINARY", "UTF8_BINARY_LCASE", "UNICODE", "UNICODE_CI").foreach(collationName =>
+      withSQLConf(SqlApiConf.DEFAULT_COLLATION -> collationName) {
+        val query = s"SELECT version()"
+        // Result & data type
+        val testQuery = sql(query)
+        val queryResult = testQuery.collect().head.getString(0)
+        val versionFormat = "^[0-9]\\.[0-9]\\.[0-9] [0-9a-f]{40}$"
+        assert(queryResult.matches(versionFormat))
+        val dataType = StringType(collationName)
+        assert(testQuery.schema.fields.head.dataType.sameType(dataType))
+      }
+    )
+  }
+
+  test("Support TypeOf misc expression with collation") {
+    // Supported collations
+    case class TypeOfTestCase(input: String, collationName: String, result: String)
+    val testCases = Seq(
+      TypeOfTestCase("1", "UTF8_BINARY", "int"),
+      TypeOfTestCase("\"A\"", "UTF8_BINARY_LCASE", "string collate UTF8_BINARY_LCASE"),
+      TypeOfTestCase("array(1)", "UNICODE", "array<int>"),
+      TypeOfTestCase("null", "UNICODE_CI", "void")
+    )
+    testCases.foreach(t => {
+      withSQLConf(SqlApiConf.DEFAULT_COLLATION -> t.collationName) {
+        val query = s"SELECT typeof(${t.input})"
+        // Result & data type
+        val testQuery = sql(query)
+        checkAnswer(testQuery, Row(t.result))
+        val dataType = StringType(t.collationName)
+        assert(testQuery.schema.fields.head.dataType.sameType(dataType))
+      }
+    })
+  }
+
+  test("Support AesEncrypt misc expression with collation") {
+    // Supported collations
+    case class AesEncryptTestCase(
+     input: String,
+     collationName: String,
+     params: String,
+     result: String
+    )
+    val testCases = Seq(
+      AesEncryptTestCase("Spark", "UTF8_BINARY", "'1234567890abcdef', 'ECB'",
+        "8DE7DB79A23F3E8ED530994DDEA98913"),
+      AesEncryptTestCase("Spark", "UTF8_BINARY_LCASE", "'1234567890abcdef', 'ECB', 'DEFAULT', ''",
+        "8DE7DB79A23F3E8ED530994DDEA98913"),
+      AesEncryptTestCase("Spark", "UNICODE", "'1234567890abcdef', 'GCM', 'DEFAULT', " +
+        "unhex('000000000000000000000000')",
+        "00000000000000000000000046596B2DE09C729FE48A0F81A00A4E7101DABEB61D"),
+      AesEncryptTestCase("Spark", "UNICODE_CI", "'1234567890abcdef', 'CBC', 'DEFAULT', " +
+        "unhex('00000000000000000000000000000000')",
+        "000000000000000000000000000000008DE7DB79A23F3E8ED530994DDEA98913")
+    )
+    testCases.foreach(t => {
+      withSQLConf(SqlApiConf.DEFAULT_COLLATION -> t.collationName) {
+        val query = s"SELECT hex(aes_encrypt('${t.input}', ${t.params}))"
+        // Result & data type
+        val testQuery = sql(query)
+        checkAnswer(testQuery, Row(t.result))
+        val dataType = StringType(t.collationName)
+        assert(testQuery.schema.fields.head.dataType.sameType(dataType))
+      }
+    })
+  }
+
+  test("Support AesDecrypt misc expression with collation") {
+    // Supported collations
+    case class AesDecryptTestCase(
+     input: String,
+     collationName: String,
+     params: String,
+     result: String
+    )
+    val testCases = Seq(
+      AesDecryptTestCase("8DE7DB79A23F3E8ED530994DDEA98913",
+        "UTF8_BINARY", "'1234567890abcdef', 'ECB'", "Spark"),
+      AesDecryptTestCase("8DE7DB79A23F3E8ED530994DDEA98913",
+        "UTF8_BINARY_LCASE", "'1234567890abcdef', 'ECB', 'DEFAULT', ''", "Spark"),
+      AesDecryptTestCase("00000000000000000000000046596B2DE09C729FE48A0F81A00A4E7101DABEB61D",
+        "UNICODE", "'1234567890abcdef', 'GCM', 'DEFAULT'", "Spark"),
+      AesDecryptTestCase("000000000000000000000000000000008DE7DB79A23F3E8ED530994DDEA98913",
+        "UNICODE_CI", "'1234567890abcdef', 'CBC', 'DEFAULT'", "Spark")
+    )
+    testCases.foreach(t => {
+      withSQLConf(SqlApiConf.DEFAULT_COLLATION -> t.collationName) {
+        val query = s"SELECT aes_decrypt(unhex('${t.input}'), ${t.params})"
+        // Result & data type
+        val testQuery = sql(query)
+        checkAnswer(testQuery, sql(s"SELECT to_binary('${t.result}', 'utf-8')"))
+        assert(testQuery.schema.fields.head.dataType.sameType(BinaryType))
+      }
     })
   }
 
