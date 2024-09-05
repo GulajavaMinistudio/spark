@@ -333,6 +333,24 @@ abstract class SparkSession[DS[U] <: Dataset[U, DS]] extends Serializable with C
   @Experimental
   def addArtifact(uri: URI): Unit
 
+  /**
+   * Add a single in-memory artifact to the session while preserving the directory structure
+   * specified by `target` under the session's working directory of that particular file
+   * extension.
+   *
+   * Supported target file extensions are .jar and .class.
+   *
+   * ==Example==
+   * {{{
+   *  addArtifact(bytesBar, "foo/bar.class")
+   *  addArtifact(bytesFlat, "flat.class")
+   *  // Directory structure of the session's working directory for class files would look like:
+   *  // ${WORKING_DIR_FOR_CLASS_FILES}/flat.class
+   *  // ${WORKING_DIR_FOR_CLASS_FILES}/foo/bar.class
+   * }}}
+   *
+   * @since 4.0.0
+   */
   @Experimental
   def addArtifact(bytes: Array[Byte], target: String): Unit
 
@@ -366,6 +384,18 @@ abstract class SparkSession[DS[U] <: Dataset[U, DS]] extends Serializable with C
   @Experimental
   @scala.annotation.varargs
   def addArtifacts(uri: URI*): Unit
+
+  /**
+   * Returns a [[DataFrameReader]] that can be used to read non-streaming data in as a
+   * `DataFrame`.
+   * {{{
+   *   sparkSession.read.parquet("/path/to/file.parquet")
+   *   sparkSession.read.schema(schema).json("/path/to/file.json")
+   * }}}
+   *
+   * @since 2.0.0
+   */
+  def read: DataFrameReader[DS]
 
   /**
    * Executes some code block and prints to stdout the time taken to execute the block. This is

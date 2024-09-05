@@ -1457,6 +1457,12 @@
     ],
     "sqlState" : "42704"
   },
+  "FLATMAPGROUPSWITHSTATE_USER_FUNCTION_ERROR" : {
+    "message" : [
+      "An error occurred in the user provided function in flatMapGroupsWithState. Reason: <reason>"
+    ],
+    "sqlState" : "39000"
+  },
   "FORBIDDEN_OPERATION" : {
     "message" : [
       "The operation <statement> is not allowed on the <objectType>: <objectName>."
@@ -2176,6 +2182,12 @@
       "Found an invalid expression encoder. Expects an instance of ExpressionEncoder but got <encoderType>. For more information consult '<docroot>/api/java/index.html?org/apache/spark/sql/Encoder.html'."
     ],
     "sqlState" : "42001"
+  },
+  "INVALID_EXTERNAL_TYPE" : {
+    "message" : [
+      "The external type <externalType> is not valid for the type <type> at the expression <expr>."
+    ],
+    "sqlState" : "42K0N"
   },
   "INVALID_EXTRACT_BASE_FIELD_TYPE" : {
     "message" : [
