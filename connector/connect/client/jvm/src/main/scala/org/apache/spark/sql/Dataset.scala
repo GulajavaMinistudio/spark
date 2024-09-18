@@ -481,13 +481,21 @@ class Dataset[T] private[sql] (
     val unpivot = builder.getUnpivotBuilder
       .setInput(plan.getRoot)
       .addAllIds(ids.toImmutableArraySeq.map(_.expr).asJava)
-      .setValueColumnName(variableColumnName)
+      .setVariableColumnName(variableColumnName)
       .setValueColumnName(valueColumnName)
     valuesOption.foreach { values =>
       unpivot.getValuesBuilder
         .addAllValues(values.toImmutableArraySeq.map(_.expr).asJava)
     }
   }
+
+  private def buildTranspose(indices: Seq[Column]): DataFrame =
+    sparkSession.newDataFrame { builder =>
+      val transpose = builder.getTransposeBuilder.setInput(plan.getRoot)
+      indices.foreach { indexColumn =>
+        transpose.addIndexColumns(indexColumn.expr)
+      }
+    }
 
   /** @inheritdoc */
   @scala.annotation.varargs
@@ -581,6 +589,14 @@ class Dataset[T] private[sql] (
       valueColumnName: String): DataFrame = {
     buildUnpivot(ids, None, variableColumnName, valueColumnName)
   }
+
+  /** @inheritdoc */
+  def transpose(indexColumn: Column): DataFrame =
+    buildTranspose(Seq(indexColumn))
+
+  /** @inheritdoc */
+  def transpose(): DataFrame =
+    buildTranspose(Seq.empty)
 
   /** @inheritdoc */
   def limit(n: Int): Dataset[T] = sparkSession.newDataset(agnosticEncoder) { builder =>
