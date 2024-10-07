@@ -351,6 +351,13 @@ private[sql] object QueryCompilationErrors extends QueryErrorsBase with Compilat
     )
   }
 
+  def trimCollationNotEnabledError(): Throwable = {
+    new AnalysisException(
+      errorClass = "UNSUPPORTED_FEATURE.TRIM_COLLATION",
+      messageParameters = Map.empty
+    )
+  }
+
   def unresolvedUsingColForJoinError(
       colName: String, suggestion: String, side: String): Throwable = {
     new AnalysisException(
@@ -851,6 +858,13 @@ private[sql] object QueryCompilationErrors extends QueryErrorsBase with Compilat
         "variableName" -> toSQLId(name),
         "searchPath" -> toSQLId(searchPath)),
       origin = origin)
+  }
+
+  def failedToLoadRoutineError(nameParts: Seq[String], e: Exception): Throwable = {
+    new AnalysisException(
+      errorClass = "FAILED_TO_LOAD_ROUTINE",
+      messageParameters = Map("routineName" -> toSQLId(nameParts)),
+      cause = Some(e))
   }
 
   def unresolvedRoutineError(name: FunctionIdentifier, searchPath: Seq[String]): Throwable = {
@@ -4117,6 +4131,19 @@ private[sql] object QueryCompilationErrors extends QueryErrorsBase with Compilat
       errorClass = "UNSUPPORTED_SUBQUERY_EXPRESSION_CATEGORY.SCALAR_SUBQUERY_IN_VALUES",
       messageParameters = Map.empty,
       origin = inlineTable.origin
+    )
+  }
+
+  def ordinalOutOfBoundsError(
+      ordinal: Int,
+      attributes: Seq[Attribute]): Throwable = {
+    new AnalysisException(
+      errorClass = "COLUMN_ORDINAL_OUT_OF_BOUNDS",
+      messageParameters = Map(
+        "ordinal" -> ordinal.toString,
+        "attributesLength" -> attributes.length.toString,
+        "attributes" -> attributes.map(attr => toSQLId(attr.name)).mkString(", ")
+      )
     )
   }
 }

@@ -526,12 +526,12 @@ class RocksDBSuite extends AlsoTestWithChangelogCheckpointingEnabled with Shared
 
     val conf = RocksDBConf().copy(compression = "zstd")
     withDB(remoteDir, conf = conf, useColumnFamilies = colFamiliesEnabled) { db =>
-      assert(db.columnFamilyOptions.compressionType() == CompressionType.ZSTD_COMPRESSION)
+      assert(db.rocksDbOptions.compressionType() == CompressionType.ZSTD_COMPRESSION)
     }
 
     // Test the default is LZ4
     withDB(remoteDir, conf = RocksDBConf().copy(), useColumnFamilies = colFamiliesEnabled) { db =>
-      assert(db.columnFamilyOptions.compressionType() == CompressionType.LZ4_COMPRESSION)
+      assert(db.rocksDbOptions.compressionType() == CompressionType.LZ4_COMPRESSION)
     }
   }
 
@@ -808,6 +808,47 @@ class RocksDBSuite extends AlsoTestWithChangelogCheckpointingEnabled with Shared
       loadAndVerifyCheckpointFiles(fileManager, verificationDir, version = 1, Nil, -1)
     } finally {
       Utils.deleteRecursively(dfsRootDir)
+    }
+  }
+
+  testWithChangelogCheckpointingEnabled("RocksDB: ensure that changelog files are written " +
+    "and snapshots uploaded optionally with changelog format v2") {
+    withTempDir { dir =>
+      val remoteDir = Utils.createTempDir().toString
+      val conf = dbConf.copy(minDeltasForSnapshot = 5, compactOnCommit = false)
+      new File(remoteDir).delete() // to make sure that the directory gets created
+      withDB(remoteDir, conf = conf, useColumnFamilies = true) { db =>
+        db.createColFamilyIfAbsent("test")
+        db.load(0)
+        db.put("a", "1")
+        db.put("b", "2")
+        db.commit()
+        assert(changelogVersionsPresent(remoteDir) == Seq(1))
+        assert(snapshotVersionsPresent(remoteDir) == Seq(1))
+
+        db.load(1)
+        db.put("a", "3")
+        db.put("c", "4")
+        db.commit()
+
+        assert(changelogVersionsPresent(remoteDir) == Seq(1, 2))
+        assert(snapshotVersionsPresent(remoteDir) == Seq(1))
+
+        db.removeColFamilyIfExists("test")
+        db.load(2)
+        db.remove("a")
+        db.put("d", "5")
+        db.commit()
+        assert(changelogVersionsPresent(remoteDir) == Seq(1, 2, 3))
+        assert(snapshotVersionsPresent(remoteDir) == Seq(1, 3))
+
+        db.load(3)
+        db.put("e", "6")
+        db.remove("b")
+        db.commit()
+        assert(changelogVersionsPresent(remoteDir) == Seq(1, 2, 3, 4))
+        assert(snapshotVersionsPresent(remoteDir) == Seq(1, 3))
+      }
     }
   }
 

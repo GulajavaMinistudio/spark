@@ -337,6 +337,10 @@ class AstBuilder extends DataTypeAstBuilder
         if Option(c.beginLabel()).isDefined &&
           c.beginLabel().multipartIdentifier().getText.toLowerCase(Locale.ROOT).equals(label)
         => true
+      case c: LoopStatementContext
+        if Option(c.beginLabel()).isDefined &&
+          c.beginLabel().multipartIdentifier().getText.toLowerCase(Locale.ROOT).equals(label)
+        => true
       case _ => false
     }
   }
@@ -372,6 +376,13 @@ class AstBuilder extends DataTypeAstBuilder
       throw SqlScriptingErrors.labelDoesNotExist(
         CurrentOrigin.get, labelText, "ITERATE")
     }
+
+  override def visitLoopStatement(ctx: LoopStatementContext): LoopStatement = {
+    val labelText = generateLabelText(Option(ctx.beginLabel()), Option(ctx.endLabel()))
+    val body = visitCompoundBody(ctx.compoundBody())
+
+    LoopStatement(body, Some(labelText))
+  }
 
   override def visitSingleStatement(ctx: SingleStatementContext): LogicalPlan = withOrigin(ctx) {
     Option(ctx.statement().asInstanceOf[ParserRuleContext])
@@ -2557,6 +2568,10 @@ class AstBuilder extends DataTypeAstBuilder
   }
 
   override def visitCollateClause(ctx: CollateClauseContext): String = withOrigin(ctx) {
+    val collationName = ctx.collationName.getText
+    if (!SQLConf.get.trimCollationEnabled && collationName.toUpperCase().contains("TRIM")) {
+      throw QueryCompilationErrors.trimCollationNotEnabledError()
+    }
     ctx.identifier.getText
   }
 
@@ -5698,6 +5713,28 @@ class AstBuilder extends DataTypeAstBuilder
   }
 
   /**
+   * Creates a plan for invoking a procedure.
+   *
+   * For example:
+   * {{{
+   *   CALL multi_part_name(v1, v2, ...);
+   *   CALL multi_part_name(v1, param2 => v2, ...);
+   *   CALL multi_part_name(param1 => v1, param2 => v2, ...);
+   * }}}
+   */
+  override def visitCall(ctx: CallContext): LogicalPlan = withOrigin(ctx) {
+    val procedure = withIdentClause(ctx.identifierReference, UnresolvedProcedure)
+    val args = ctx.functionArgument.asScala.map {
+      case expr if expr.namedArgumentExpression != null =>
+        val namedExpr = expr.namedArgumentExpression
+        NamedArgumentExpression(namedExpr.key.getText, expression(namedExpr.value))
+      case expr =>
+        expression(expr)
+    }.toSeq
+    Call(procedure, args)
+  }
+
+  /**
    * Create a TimestampAdd expression.
    */
   override def visitTimestampadd(ctx: TimestampaddContext): Expression = withOrigin(ctx) {
@@ -5854,7 +5891,32 @@ class AstBuilder extends DataTypeAstBuilder
         windowClause = null,
         relation = left,
         isPipeOperatorSelect = true)
-    }.get
+    }.getOrElse(Option(ctx.whereClause).map { c =>
+      // Add a table subquery boundary between the new filter and the input plan if one does not
+      // already exist. This helps the analyzer behave as if we had added the WHERE clause after a
+      // table subquery containing the input plan.
+      val withSubqueryAlias = left match {
+        case s: SubqueryAlias =>
+          s
+        case u: UnresolvedRelation =>
+          u
+        case _ =>
+          SubqueryAlias(SubqueryAlias.generateSubqueryName(), left)
+      }
+      withWhereClause(c, withSubqueryAlias)
+    }.getOrElse(Option(ctx.pivotClause()).map { c =>
+      if (ctx.unpivotClause() != null) {
+        throw QueryParsingErrors.unpivotWithPivotInFromClauseNotAllowedError(ctx)
+      }
+      withPivot(c, left)
+    }.getOrElse(Option(ctx.unpivotClause()).map { c =>
+      if (ctx.pivotClause() != null) {
+        throw QueryParsingErrors.unpivotWithPivotInFromClauseNotAllowedError(ctx)
+      }
+      withUnpivot(c, left)
+    }.getOrElse(Option(ctx.sample).map { c =>
+      withSample(c, left)
+    }.get))))
   }
 
   /**

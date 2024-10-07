@@ -25,9 +25,10 @@ import _root_.java.lang
 import _root_.java.net.URI
 import _root_.java.util
 
-import org.apache.spark.annotation.{DeveloperApi, Experimental}
+import org.apache.spark.annotation.{DeveloperApi, Experimental, Stable, Unstable}
 import org.apache.spark.sql.{Encoder, Row, RuntimeConfig}
 import org.apache.spark.sql.types.StructType
+import org.apache.spark.util.SparkClassUtils
 
 /**
  * The entry point to programming Spark with the Dataset and DataFrame API.
@@ -49,7 +50,7 @@ import org.apache.spark.sql.types.StructType
  *     .getOrCreate()
  * }}}
  */
-abstract class SparkSession[DS[U] <: Dataset[U, DS]] extends Serializable with Closeable {
+abstract class SparkSession extends Serializable with Closeable {
 
   /**
    * The version of Spark on which this application is running.
@@ -93,6 +94,15 @@ abstract class SparkSession[DS[U] <: Dataset[U, DS]] extends Serializable with C
   def udf: UDFRegistration
 
   /**
+   * Returns a `StreamingQueryManager` that allows managing all the `StreamingQuery`s active on
+   * `this`.
+   *
+   * @since 2.0.0
+   */
+  @Unstable
+  def streams: StreamingQueryManager
+
+  /**
    * Start a new session with isolated SQL configurations, temporary tables, registered functions
    * are isolated, but sharing the underlying `SparkContext` and cached data.
    *
@@ -103,7 +113,7 @@ abstract class SparkSession[DS[U] <: Dataset[U, DS]] extends Serializable with C
    *   will initialize the metastore, which may take some time.
    * @since 2.0.0
    */
-  def newSession(): SparkSession[DS]
+  def newSession(): SparkSession
 
   /* --------------------------------- *
    |  Methods for creating DataFrames  |
@@ -115,14 +125,14 @@ abstract class SparkSession[DS[U] <: Dataset[U, DS]] extends Serializable with C
    * @since 2.0.0
    */
   @transient
-  def emptyDataFrame: DS[Row]
+  def emptyDataFrame: Dataset[Row]
 
   /**
    * Creates a `DataFrame` from a local Seq of Product.
    *
    * @since 2.0.0
    */
-  def createDataFrame[A <: Product: TypeTag](data: Seq[A]): DS[Row]
+  def createDataFrame[A <: Product: TypeTag](data: Seq[A]): Dataset[Row]
 
   /**
    * :: DeveloperApi :: Creates a `DataFrame` from a `java.util.List` containing
@@ -133,7 +143,7 @@ abstract class SparkSession[DS[U] <: Dataset[U, DS]] extends Serializable with C
    * @since 2.0.0
    */
   @DeveloperApi
-  def createDataFrame(rows: util.List[Row], schema: StructType): DS[Row]
+  def createDataFrame(rows: util.List[Row], schema: StructType): Dataset[Row]
 
   /**
    * Applies a schema to a List of Java Beans.
@@ -143,7 +153,7 @@ abstract class SparkSession[DS[U] <: Dataset[U, DS]] extends Serializable with C
    *
    * @since 1.6.0
    */
-  def createDataFrame(data: util.List[_], beanClass: Class[_]): DS[Row]
+  def createDataFrame(data: util.List[_], beanClass: Class[_]): Dataset[Row]
 
   /* ------------------------------- *
    |  Methods for creating DataSets  |
@@ -154,7 +164,7 @@ abstract class SparkSession[DS[U] <: Dataset[U, DS]] extends Serializable with C
    *
    * @since 2.0.0
    */
-  def emptyDataset[T: Encoder]: DS[T]
+  def emptyDataset[T: Encoder]: Dataset[T]
 
   /**
    * Creates a [[Dataset]] from a local Seq of data of a given type. This method requires an
@@ -183,7 +193,7 @@ abstract class SparkSession[DS[U] <: Dataset[U, DS]] extends Serializable with C
    *
    * @since 2.0.0
    */
-  def createDataset[T: Encoder](data: Seq[T]): DS[T]
+  def createDataset[T: Encoder](data: Seq[T]): Dataset[T]
 
   /**
    * Creates a [[Dataset]] from a `java.util.List` of a given type. This method requires an
@@ -200,7 +210,7 @@ abstract class SparkSession[DS[U] <: Dataset[U, DS]] extends Serializable with C
    *
    * @since 2.0.0
    */
-  def createDataset[T: Encoder](data: util.List[T]): DS[T]
+  def createDataset[T: Encoder](data: util.List[T]): Dataset[T]
 
   /**
    * Creates a [[Dataset]] with a single `LongType` column named `id`, containing elements in a
@@ -208,7 +218,7 @@ abstract class SparkSession[DS[U] <: Dataset[U, DS]] extends Serializable with C
    *
    * @since 2.0.0
    */
-  def range(end: Long): DS[lang.Long]
+  def range(end: Long): Dataset[lang.Long]
 
   /**
    * Creates a [[Dataset]] with a single `LongType` column named `id`, containing elements in a
@@ -216,7 +226,7 @@ abstract class SparkSession[DS[U] <: Dataset[U, DS]] extends Serializable with C
    *
    * @since 2.0.0
    */
-  def range(start: Long, end: Long): DS[lang.Long]
+  def range(start: Long, end: Long): Dataset[lang.Long]
 
   /**
    * Creates a [[Dataset]] with a single `LongType` column named `id`, containing elements in a
@@ -224,7 +234,7 @@ abstract class SparkSession[DS[U] <: Dataset[U, DS]] extends Serializable with C
    *
    * @since 2.0.0
    */
-  def range(start: Long, end: Long, step: Long): DS[lang.Long]
+  def range(start: Long, end: Long, step: Long): Dataset[lang.Long]
 
   /**
    * Creates a [[Dataset]] with a single `LongType` column named `id`, containing elements in a
@@ -232,7 +242,7 @@ abstract class SparkSession[DS[U] <: Dataset[U, DS]] extends Serializable with C
    *
    * @since 2.0.0
    */
-  def range(start: Long, end: Long, step: Long, numPartitions: Int): DS[lang.Long]
+  def range(start: Long, end: Long, step: Long, numPartitions: Int): Dataset[lang.Long]
 
   /* ------------------------- *
    |  Catalog-related methods  |
@@ -244,7 +254,7 @@ abstract class SparkSession[DS[U] <: Dataset[U, DS]] extends Serializable with C
    *
    * @since 2.0.0
    */
-  def catalog: Catalog[DS]
+  def catalog: Catalog
 
   /**
    * Returns the specified table/view as a `DataFrame`. If it's a table, it must support batch
@@ -259,7 +269,7 @@ abstract class SparkSession[DS[U] <: Dataset[U, DS]] extends Serializable with C
    *   database. Note that, the global temporary view database is also valid here.
    * @since 2.0.0
    */
-  def table(tableName: String): DS[Row]
+  def table(tableName: String): Dataset[Row]
 
   /* ----------------- *
    |  Everything else  |
@@ -281,7 +291,7 @@ abstract class SparkSession[DS[U] <: Dataset[U, DS]] extends Serializable with C
    * @since 3.5.0
    */
   @Experimental
-  def sql(sqlText: String, args: Array[_]): DS[Row]
+  def sql(sqlText: String, args: Array[_]): Dataset[Row]
 
   /**
    * Executes a SQL query substituting named parameters by the given arguments, returning the
@@ -299,7 +309,7 @@ abstract class SparkSession[DS[U] <: Dataset[U, DS]] extends Serializable with C
    * @since 3.4.0
    */
   @Experimental
-  def sql(sqlText: String, args: Map[String, Any]): DS[Row]
+  def sql(sqlText: String, args: Map[String, Any]): Dataset[Row]
 
   /**
    * Executes a SQL query substituting named parameters by the given arguments, returning the
@@ -317,7 +327,7 @@ abstract class SparkSession[DS[U] <: Dataset[U, DS]] extends Serializable with C
    * @since 3.4.0
    */
   @Experimental
-  def sql(sqlText: String, args: util.Map[String, Any]): DS[Row] = {
+  def sql(sqlText: String, args: util.Map[String, Any]): Dataset[Row] = {
     sql(sqlText, args.asScala.toMap)
   }
 
@@ -327,7 +337,7 @@ abstract class SparkSession[DS[U] <: Dataset[U, DS]] extends Serializable with C
    *
    * @since 2.0.0
    */
-  def sql(sqlText: String): DS[Row] = sql(sqlText, Map.empty[String, Any])
+  def sql(sqlText: String): Dataset[Row] = sql(sqlText, Map.empty[String, Any])
 
   /**
    * Add a single artifact to the current session.
@@ -503,7 +513,31 @@ abstract class SparkSession[DS[U] <: Dataset[U, DS]] extends Serializable with C
    *
    * @since 2.0.0
    */
-  def read: DataFrameReader[DS]
+  def read: DataFrameReader
+
+  /**
+   * Returns a `DataStreamReader` that can be used to read streaming data in as a `DataFrame`.
+   * {{{
+   *   sparkSession.readStream.parquet("/path/to/directory/of/parquet/files")
+   *   sparkSession.readStream.schema(schema).json("/path/to/directory/of/json/files")
+   * }}}
+   *
+   * @since 2.0.0
+   */
+  def readStream: DataStreamReader
+
+  /**
+   * (Scala-specific) Implicit methods available in Scala for converting common Scala objects into
+   * `DataFrame`s.
+   *
+   * {{{
+   *   val sparkSession = SparkSession.builder.getOrCreate()
+   *   import sparkSession.implicits._
+   * }}}
+   *
+   * @since 2.0.0
+   */
+  val implicits: SQLImplicits
 
   /**
    * Executes some code block and prints to stdout the time taken to execute the block. This is
@@ -527,4 +561,172 @@ abstract class SparkSession[DS[U] <: Dataset[U, DS]] extends Serializable with C
    * @since 2.0.0
    */
   def stop(): Unit = close()
+}
+
+object SparkSession extends SparkSessionCompanion {
+  private[this] val companion: SparkSessionCompanion = {
+    val cls = SparkClassUtils.classForName("org.apache.spark.sql.SparkSession")
+    val mirror = scala.reflect.runtime.currentMirror
+    val module = mirror.classSymbol(cls).companion.asModule
+    mirror.reflectModule(module).instance.asInstanceOf[SparkSessionCompanion]
+  }
+
+  /** @inheritdoc */
+  override def builder(): SparkSessionBuilder = companion.builder()
+}
+
+/**
+ * Companion of a [[SparkSession]].
+ */
+private[sql] abstract class SparkSessionCompanion {
+
+  /**
+   * Creates a [[SparkSessionBuilder]] for constructing a [[SparkSession]].
+   *
+   * @since 2.0.0
+   */
+  def builder(): SparkSessionBuilder
+}
+
+/**
+ * Builder for [[SparkSession]].
+ */
+@Stable
+abstract class SparkSessionBuilder {
+  protected val options = new scala.collection.mutable.HashMap[String, String]
+
+  /**
+   * Sets a name for the application, which will be shown in the Spark web UI. If no application
+   * name is set, a randomly generated name will be used.
+   *
+   * @since 2.0.0
+   */
+  def appName(name: String): this.type = config("spark.app.name", name)
+
+  /**
+   * Sets the Spark master URL to connect to, such as "local" to run locally, "local[4]" to run
+   * locally with 4 cores, or "spark://master:7077" to run on a Spark standalone cluster.
+   *
+   * @note
+   *   this is only supported in Classic.
+   * @since 2.0.0
+   */
+  def master(master: String): this.type = config("spark.master", master)
+
+  /**
+   * Enables Hive support, including connectivity to a persistent Hive metastore, support for Hive
+   * serdes, and Hive user-defined functions.
+   *
+   * @note
+   *   this is only supported in Classic.
+   * @since 2.0.0
+   */
+  def enableHiveSupport(): this.type = config("spark.sql.catalogImplementation", "hive")
+
+  /**
+   * Sets the Spark Connect remote URL.
+   *
+   * @note
+   *   this is only supported in Connect.
+   * @since 3.5.0
+   */
+  def remote(connectionString: String): this.type
+
+  /**
+   * Sets a config option. Options set using this method are automatically propagated to both
+   * `SparkConf` and SparkSession's own configuration.
+   *
+   * @note
+   *   this is only supported in Connect mode.
+   * @since 2.0.0
+   */
+  def config(key: String, value: String): this.type = synchronized {
+    options += key -> value
+    this
+  }
+
+  /**
+   * Sets a config option. Options set using this method are automatically propagated to both
+   * `SparkConf` and SparkSession's own configuration.
+   *
+   * @since 2.0.0
+   */
+  def config(key: String, value: Long): this.type = synchronized {
+    options += key -> value.toString
+    this
+  }
+
+  /**
+   * Sets a config option. Options set using this method are automatically propagated to both
+   * `SparkConf` and SparkSession's own configuration.
+   *
+   * @since 2.0.0
+   */
+  def config(key: String, value: Double): this.type = synchronized {
+    options += key -> value.toString
+    this
+  }
+
+  /**
+   * Sets a config option. Options set using this method are automatically propagated to both
+   * `SparkConf` and SparkSession's own configuration.
+   *
+   * @since 2.0.0
+   */
+  def config(key: String, value: Boolean): this.type = synchronized {
+    options += key -> value.toString
+    this
+  }
+
+  /**
+   * Sets a config option. Options set using this method are automatically propagated to both
+   * `SparkConf` and SparkSession's own configuration.
+   *
+   * @since 3.4.0
+   */
+  def config(map: Map[String, Any]): this.type = synchronized {
+    map.foreach { kv: (String, Any) =>
+      {
+        options += kv._1 -> kv._2.toString
+      }
+    }
+    this
+  }
+
+  /**
+   * Sets a config option. Options set using this method are automatically propagated to both
+   * `SparkConf` and SparkSession's own configuration.
+   *
+   * @since 3.4.0
+   */
+  def config(map: util.Map[String, Any]): this.type = synchronized {
+    config(map.asScala.toMap)
+  }
+
+  /**
+   * Gets an existing [[SparkSession]] or, if there is no existing one, creates a new one based on
+   * the options set in this builder.
+   *
+   * This method first checks whether there is a valid thread-local SparkSession, and if yes,
+   * return that one. It then checks whether there is a valid global default SparkSession, and if
+   * yes, return that one. If no valid global default SparkSession exists, the method creates a
+   * new SparkSession and assigns the newly created SparkSession as the global default.
+   *
+   * In case an existing SparkSession is returned, the non-static config options specified in this
+   * builder will be applied to the existing SparkSession.
+   *
+   * @since 2.0.0
+   */
+  def getOrCreate(): SparkSession
+
+  /**
+   * Create a new [[SparkSession]].
+   *
+   * This will always return a newly created session.
+   *
+   * This method will update the default and/or active session if they are not set.
+   *
+   * @since 3.5.0
+   */
+  def create(): SparkSession
 }
