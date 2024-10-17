@@ -15,19 +15,21 @@
  * limitations under the License.
  */
 
-package org.apache.spark.sql.jdbc
+package org.apache.spark.sql.execution.datasources.csv
 
-class MsSQLServerDatabaseOnDocker extends DatabaseOnDocker {
-  override val imageName = sys.env.getOrElse("MSSQLSERVER_DOCKER_IMAGE_NAME",
-    "mcr.microsoft.com/mssql/server:2022-CU15-ubuntu-22.04")
-  override val env = Map(
-    "SA_PASSWORD" -> "Sapass123",
-    "ACCEPT_EULA" -> "Y"
-  )
-  override val usesIpc = false
-  override val jdbcPort: Int = 1433
+import org.apache.spark.sql.{QueryTest, Row}
+import org.apache.spark.sql.test.SharedSparkSession
 
-  override def getJdbcUrl(ip: String, port: Int): String =
-    s"jdbc:sqlserver://$ip:$port;user=sa;password=Sapass123;" +
-      "encrypt=true;trustServerCertificate=true"
+class CSVParsingOptionsSuite extends QueryTest with SharedSparkSession {
+  import testImplicits._
+
+  test("SPARK-49955: null string value does not mean corrupted file") {
+    val str = "abc"
+    val stringDataset = Seq(str, null).toDS()
+    val df = spark.read.csv(stringDataset)
+    // `spark.read.csv(rdd)` removes all null values at the beginning.
+    checkAnswer(df, Seq(Row("abc")))
+    val df2 = spark.read.option("mode", "failfast").csv(stringDataset)
+    checkAnswer(df2, Seq(Row("abc")))
+  }
 }
