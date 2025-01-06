@@ -148,7 +148,7 @@ class AnalyzeResult:
         The schema that the Python UDTF will return.
     withSinglePartition: bool
         If true, the UDTF is specifying for Catalyst to repartition all rows of the input TABLE
-        argument to one collection for consumption by exactly one instance of the correpsonding
+        argument to one collection for consumption by exactly one instance of the corresponding
         UDTF class.
     partitionBy: sequence of :class:`PartitioningColumn`
         If non-empty, this is a sequence of expressions that the UDTF is specifying for Catalyst to
@@ -362,14 +362,14 @@ class UserDefinedTableFunction:
 
         assert sc._jvm is not None
         if self.returnType is None:
-            judtf = sc._jvm.org.apache.spark.sql.execution.python.UserDefinedPythonTableFunction(
-                self._name, wrapped_func, self.evalType, self.deterministic
-            )
+            judtf = getattr(
+                sc._jvm, "org.apache.spark.sql.execution.python.UserDefinedPythonTableFunction"
+            )(self._name, wrapped_func, self.evalType, self.deterministic)
         else:
             jdt = spark._jsparkSession.parseDataType(self.returnType.json())
-            judtf = sc._jvm.org.apache.spark.sql.execution.python.UserDefinedPythonTableFunction(
-                self._name, wrapped_func, jdt, self.evalType, self.deterministic
-            )
+            judtf = getattr(
+                sc._jvm, "org.apache.spark.sql.execution.python.UserDefinedPythonTableFunction"
+            )(self._name, wrapped_func, jdt, self.evalType, self.deterministic)
         return judtf
 
     def __call__(self, *args: "ColumnOrName", **kwargs: "ColumnOrName") -> "DataFrame":

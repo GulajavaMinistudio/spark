@@ -115,6 +115,7 @@ EXECUTE	false
 EXISTS	false
 EXPLAIN	false
 EXPORT	false
+EXTEND	false
 EXTENDED	false
 EXTERNAL	false
 EXTRACT	false
@@ -251,6 +252,7 @@ REAL	false
 RECORDREADER	false
 RECORDWRITER	false
 RECOVER	false
+RECURSIVE	false
 REDUCE	false
 REFERENCES	false
 REFRESH	false

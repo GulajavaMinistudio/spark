@@ -17,6 +17,8 @@
 
 package org.apache.spark.sql.catalyst.analysis
 
+import org.apache.commons.lang3.StringUtils
+
 import org.apache.spark.SparkException
 import org.apache.spark.internal.LogKeys.CONFIG
 import org.apache.spark.internal.MDC
@@ -30,7 +32,7 @@ import org.apache.spark.sql.catalyst.util.{quoteIfNeeded, toPrettySQL, CharVarch
 import org.apache.spark.sql.catalyst.util.ResolveDefaultColumns._
 import org.apache.spark.sql.connector.catalog.{CatalogExtension, CatalogManager, CatalogPlugin, CatalogV2Util, LookupCatalog, SupportsNamespaces, V1Table}
 import org.apache.spark.sql.connector.expressions.Transform
-import org.apache.spark.sql.errors.QueryCompilationErrors
+import org.apache.spark.sql.errors.{QueryCompilationErrors, QueryExecutionErrors}
 import org.apache.spark.sql.execution.command._
 import org.apache.spark.sql.execution.datasources.{CreateTable => CreateTableV1}
 import org.apache.spark.sql.execution.datasources.v2.DataSourceV2Utils
@@ -52,6 +54,11 @@ class ResolveSessionCatalog(val catalogManager: CatalogManager)
   import org.apache.spark.sql.execution.datasources.v2.DataSourceV2Implicits._
 
   override def apply(plan: LogicalPlan): LogicalPlan = plan.resolveOperatorsUp {
+    case _ if ResolveDefaultStringTypes.needsResolution(plan) =>
+      // if there are still unresolved string types in the plan
+      // we should not try to resolve it
+      plan
+
     case AddColumns(ResolvedV1TableIdentifier(ident), cols) =>
       cols.foreach { c =>
         if (c.name.length > 1) {
@@ -137,6 +144,9 @@ class ResolveSessionCatalog(val catalogManager: CatalogManager)
       AlterDatabasePropertiesCommand(db, properties)
 
     case SetNamespaceLocation(ResolvedV1Database(db), location) if conf.useV1Command =>
+      if (StringUtils.isEmpty(location)) {
+        throw QueryExecutionErrors.invalidEmptyLocationError(location)
+      }
       AlterDatabaseSetLocationCommand(db, location)
 
     case RenameTable(ResolvedV1TableOrViewIdentifier(oldIdent), newName, isView) =>
@@ -240,6 +250,9 @@ class ResolveSessionCatalog(val catalogManager: CatalogManager)
       val comment = c.properties.get(SupportsNamespaces.PROP_COMMENT)
       val location = c.properties.get(SupportsNamespaces.PROP_LOCATION)
       val newProperties = c.properties -- CatalogV2Util.NAMESPACE_RESERVED_PROPERTIES
+      if (location.isDefined && location.get.isEmpty) {
+        throw QueryExecutionErrors.invalidEmptyLocationError(location.get)
+      }
       CreateDatabaseCommand(name, c.ifNotExists, location, comment, newProperties)
 
     case d @ DropNamespace(ResolvedV1Database(db), _, _) if conf.useV1Command =>
@@ -408,11 +421,12 @@ class ResolveSessionCatalog(val catalogManager: CatalogManager)
       AlterViewSchemaBindingCommand(ident, viewSchemaMode)
 
     case CreateView(ResolvedIdentifierInSessionCatalog(ident), userSpecifiedColumns, comment,
-        properties, originalText, child, allowExisting, replace, viewSchemaMode) =>
+        collation, properties, originalText, child, allowExisting, replace, viewSchemaMode) =>
       CreateViewCommand(
         name = ident,
         userSpecifiedColumns = userSpecifiedColumns,
         comment = comment,
+        collation = collation,
         properties = properties,
         originalText = originalText,
         plan = child,
@@ -421,7 +435,7 @@ class ResolveSessionCatalog(val catalogManager: CatalogManager)
         viewType = PersistedView,
         viewSchemaMode = viewSchemaMode)
 
-    case CreateView(ResolvedIdentifier(catalog, _), _, _, _, _, _, _, _, _) =>
+    case CreateView(ResolvedIdentifier(catalog, _), _, _, _, _, _, _, _, _, _) =>
       throw QueryCompilationErrors.missingCatalogAbilityError(catalog, "views")
 
     case ShowViews(ns: ResolvedNamespace, pattern, output) =>
@@ -495,8 +509,8 @@ class ResolveSessionCatalog(val catalogManager: CatalogManager)
       storageFormat: CatalogStorageFormat,
       provider: String): CreateTableV1 = {
     val tableDesc = buildCatalogTable(
-      ident, tableSchema, partitioning, tableSpec.properties, provider,
-      tableSpec.location, tableSpec.comment, storageFormat, tableSpec.external)
+      ident, tableSchema, partitioning, tableSpec.properties, provider, tableSpec.location,
+      tableSpec.comment, tableSpec.collation, storageFormat, tableSpec.external)
     val mode = if (ignoreIfExists) SaveMode.Ignore else SaveMode.ErrorIfExists
     CreateTableV1(tableDesc, mode, query)
   }
@@ -572,6 +586,7 @@ class ResolveSessionCatalog(val catalogManager: CatalogManager)
       provider: String,
       location: Option[String],
       comment: Option[String],
+      collation: Option[String],
       storageFormat: CatalogStorageFormat,
       external: Boolean): CatalogTable = {
     val tableType = if (external || location.isDefined) {
@@ -592,7 +607,9 @@ class ResolveSessionCatalog(val catalogManager: CatalogManager)
       properties = properties ++
         maybeClusterBySpec.map(
           clusterBySpec => ClusterBySpec.toProperty(schema, clusterBySpec, conf.resolver)),
-      comment = comment)
+      comment = comment,
+      collation = collation
+    )
   }
 
   object ResolvedViewIdentifier {

@@ -66,12 +66,11 @@ class ArtifactManager(session: SparkSession) extends Logging {
   // The base directory/URI where all artifacts are stored for this `sessionUUID`.
   protected[artifact] val (artifactPath, artifactURI): (Path, String) =
     (ArtifactUtils.concatenatePaths(artifactRootPath, session.sessionUUID),
-      s"$artifactRootURI${File.separator}${session.sessionUUID}")
+      s"$artifactRootURI/${session.sessionUUID}")
 
   // The base directory/URI where all class file artifacts are stored for this `sessionUUID`.
   protected[artifact] val (classDir, replClassURI): (Path, String) =
-    (ArtifactUtils.concatenatePaths(artifactPath, "classes"),
-      s"$artifactURI${File.separator}classes${File.separator}")
+    (ArtifactUtils.concatenatePaths(artifactPath, "classes"), s"$artifactURI/classes/")
 
   private lazy val alwaysApplyClassLoader =
     session.conf.get(SQLConf.ARTIFACTS_SESSION_ISOLATION_ALWAYS_APPLY_CLASSLOADER.key).toBoolean
@@ -87,6 +86,9 @@ class ArtifactManager(session: SparkSession) extends Logging {
    * we should apply the classloader to the session, see `withClassLoaderIfNeeded`.
    */
   protected val sessionArtifactAdded = new AtomicBoolean(false)
+
+  @volatile
+  protected var cachedClassLoader: Option[ClassLoader] = None
 
   private def withClassLoaderIfNeeded[T](f: => T): T = {
     val log = s" classloader for session ${session.sessionUUID} because " +
@@ -203,6 +205,7 @@ class ArtifactManager(session: SparkSession) extends Logging {
         allowOverwrite = true,
         deleteSource = deleteStagedFile)
       sessionArtifactAdded.set(true)
+      cachedClassLoader = None
     } else {
       val target = ArtifactUtils.concatenatePaths(artifactPath, normalizedRemoteRelativePath)
       // Disallow overwriting with modified version
@@ -227,6 +230,7 @@ class ArtifactManager(session: SparkSession) extends Logging {
           (SparkContextResourceType.JAR, normalizedRemoteRelativePath, fragment))
         jarsList.add(normalizedRemoteRelativePath)
         sessionArtifactAdded.set(true)
+        cachedClassLoader = None
       } else if (normalizedRemoteRelativePath.startsWith(s"pyfiles${File.separator}")) {
         session.sparkContext.addFile(uri)
         sparkContextRelativePaths.add(
@@ -282,10 +286,18 @@ class ArtifactManager(session: SparkSession) extends Logging {
     }
   }
 
+  def classloader: ClassLoader = synchronized {
+    cachedClassLoader.getOrElse {
+      val loader = buildClassLoader
+      cachedClassLoader = Some(loader)
+      loader
+    }
+  }
+
   /**
    * Returns a [[ClassLoader]] for session-specific jar/class file resources.
    */
-  def classloader: ClassLoader = {
+  private def buildClassLoader: ClassLoader = {
     val urls = (getAddedJars :+ classDir.toUri.toURL).toArray
     val prefixes = SparkEnv.get.conf.get(CONNECT_SCALA_UDF_STUB_PREFIXES)
     val userClasspathFirst = SparkEnv.get.conf.get(EXECUTOR_USER_CLASS_PATH_FIRST)
@@ -395,6 +407,9 @@ class ArtifactManager(session: SparkSession) extends Logging {
     pythonIncludeList.clear()
     cachedBlockIdList.clear()
     sparkContextRelativePaths.clear()
+
+    // Removed cached classloader
+    cachedClassLoader = None
   }
 
   def uploadArtifactToFs(

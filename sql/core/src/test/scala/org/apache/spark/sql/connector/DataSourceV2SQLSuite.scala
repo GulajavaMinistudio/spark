@@ -32,7 +32,7 @@ import org.apache.spark.sql.catalyst.CurrentUserContext.CURRENT_USER
 import org.apache.spark.sql.catalyst.analysis.{CannotReplaceMissingTableException, NoSuchNamespaceException, TableAlreadyExistsException}
 import org.apache.spark.sql.catalyst.catalog.{CatalogStorageFormat, CatalogTable, CatalogTableType, CatalogUtils}
 import org.apache.spark.sql.catalyst.parser.ParseException
-import org.apache.spark.sql.catalyst.plans.logical.{AppendData, ColumnStat, CommandResult, OverwriteByExpression}
+import org.apache.spark.sql.catalyst.plans.logical.ColumnStat
 import org.apache.spark.sql.catalyst.statsEstimation.StatsEstimationTestBase
 import org.apache.spark.sql.catalyst.util.DateTimeUtils
 import org.apache.spark.sql.connector.catalog.{Column => ColumnV2, _}
@@ -44,7 +44,6 @@ import org.apache.spark.sql.execution.FilterExec
 import org.apache.spark.sql.execution.adaptive.AdaptiveSparkPlanHelper
 import org.apache.spark.sql.execution.columnar.InMemoryRelation
 import org.apache.spark.sql.execution.datasources.{HadoopFsRelation, LogicalRelationWithTable}
-import org.apache.spark.sql.execution.datasources.v2.DataSourceV2Relation
 import org.apache.spark.sql.execution.datasources.v2.DataSourceV2ScanRelation
 import org.apache.spark.sql.execution.streaming.MemoryStream
 import org.apache.spark.sql.internal.{SQLConf, StaticSQLConf}
@@ -1261,8 +1260,12 @@ class DataSourceV2SQLSuiteV1Filter
       PROP_OWNER -> "it will be set to the current user",
       PROP_EXTERNAL -> "please use CREATE EXTERNAL TABLE"
     )
+    val excludedProperties = Set(TableCatalog.PROP_COMMENT, TableCatalog.PROP_COLLATION)
+    val tableLegacyProperties = CatalogV2Util.TABLE_RESERVED_PROPERTIES
+      .filterNot(excludedProperties.contains)
+
     withSQLConf((SQLConf.LEGACY_PROPERTY_NON_RESERVED.key, "false")) {
-      CatalogV2Util.TABLE_RESERVED_PROPERTIES.filterNot(_ == PROP_COMMENT).foreach { key =>
+      tableLegacyProperties.foreach { key =>
         Seq("OPTIONS", "TBLPROPERTIES").foreach { clause =>
           Seq("CREATE", "REPLACE").foreach { action =>
             val sqlText = s"$action TABLE testcat.reservedTest (key int) " +
@@ -1315,7 +1318,7 @@ class DataSourceV2SQLSuiteV1Filter
       }
     }
     withSQLConf((SQLConf.LEGACY_PROPERTY_NON_RESERVED.key, "true")) {
-      CatalogV2Util.TABLE_RESERVED_PROPERTIES.filterNot(_ == PROP_COMMENT).foreach { key =>
+      tableLegacyProperties.foreach { key =>
         Seq("OPTIONS", "TBLPROPERTIES").foreach { clause =>
           withTable("testcat.reservedTest") {
             Seq("CREATE", "REPLACE").foreach { action =>
@@ -3390,6 +3393,7 @@ class DataSourceV2SQLSuiteV1Filter
            |TBLPROPERTIES ('prop1' = '1', 'prop2' = '2')
            |PARTITIONED BY (a)
            |LOCATION '/tmp'
+           |DEFAULT COLLATION sr_CI_AI
         """.stripMargin)
 
       val table = spark.sessionState.catalogManager.v2SessionCatalog.asTableCatalog
@@ -3397,6 +3401,7 @@ class DataSourceV2SQLSuiteV1Filter
       val properties = table.properties
       assert(properties.get(TableCatalog.PROP_PROVIDER) == "parquet")
       assert(properties.get(TableCatalog.PROP_COMMENT) == "This is a comment")
+      assert(properties.get(TableCatalog.PROP_COLLATION) == "sr_CI_AI")
       assert(properties.get(TableCatalog.PROP_LOCATION) == "file:/tmp")
       assert(properties.containsKey(TableCatalog.PROP_OWNER))
       assert(properties.get(TableCatalog.PROP_EXTERNAL) == "true")
@@ -3631,96 +3636,6 @@ class DataSourceV2SQLSuiteV1Filter
     withSQLConf(V2_SESSION_CATALOG_IMPLEMENTATION.key -> classOf[InMemoryCatalog].getName) {
       sql("CREATE DATABASE test_db")
       sql("USE test_db")
-    }
-  }
-
-
-  test("SPARK-36680: Supports Dynamic Table Options for Spark SQL") {
-    val t1 = s"${catalogAndNamespace}table"
-    withTable(t1) {
-      sql(s"CREATE TABLE $t1 (id bigint, data string) USING $v2Format")
-      sql(s"INSERT INTO $t1 VALUES (1, 'a'), (2, 'b')")
-
-      var df = sql(s"SELECT * FROM $t1")
-      var collected = df.queryExecution.optimizedPlan.collect {
-        case scan: DataSourceV2ScanRelation =>
-          assert(scan.relation.options.isEmpty)
-      }
-      assert (collected.size == 1)
-      checkAnswer(df, Seq(Row(1, "a"), Row(2, "b")))
-
-      df = sql(s"SELECT * FROM $t1 WITH (`split-size` = 5)")
-      collected = df.queryExecution.optimizedPlan.collect {
-        case scan: DataSourceV2ScanRelation =>
-          assert(scan.relation.options.get("split-size") == "5")
-      }
-      assert (collected.size == 1)
-      checkAnswer(df, Seq(Row(1, "a"), Row(2, "b")))
-
-      val noValues = intercept[AnalysisException](
-        sql(s"SELECT * FROM $t1 WITH (`split-size`)"))
-      assert(noValues.message.contains(
-        "Operation not allowed: Values must be specified for key(s): [split-size]"))
-    }
-  }
-
-  test("SPARK-36680: Supports Dynamic Table Options for Insert") {
-    val t1 = s"${catalogAndNamespace}table"
-    withTable(t1) {
-      sql(s"CREATE TABLE $t1 (id bigint, data string) USING $v2Format")
-      val df = sql(s"INSERT INTO $t1 WITH (`write.split-size` = 10) VALUES (1, 'a'), (2, 'b')")
-
-      val collected = df.queryExecution.optimizedPlan.collect {
-        case CommandResult(_, AppendData(relation: DataSourceV2Relation, _, _, _, _, _), _, _) =>
-          assert(relation.options.get("write.split-size") == "10")
-      }
-      assert (collected.size == 1)
-
-      val insertResult = sql(s"SELECT * FROM $t1")
-      checkAnswer(insertResult, Seq(Row(1, "a"), Row(2, "b")))
-    }
-  }
-
-  test("SPARK-36680: Supports Dynamic Table Options for Insert Overwrite") {
-    val t1 = s"${catalogAndNamespace}table"
-    withTable(t1) {
-      sql(s"CREATE TABLE $t1 (id bigint, data string) USING $v2Format")
-      sql(s"INSERT INTO $t1 WITH (`write.split-size` = 10) VALUES (1, 'a'), (2, 'b')")
-
-      val df = sql(s"INSERT OVERWRITE $t1 WITH (`write.split-size` = 10) " +
-        s"VALUES (3, 'c'), (4, 'd')")
-      val collected = df.queryExecution.optimizedPlan.collect {
-        case CommandResult(_,
-          OverwriteByExpression(relation: DataSourceV2Relation, _, _, _, _, _, _),
-          _, _) =>
-          assert(relation.options.get("write.split-size") == "10")
-      }
-      assert (collected.size == 1)
-
-      val insertResult = sql(s"SELECT * FROM $t1")
-      checkAnswer(insertResult, Seq(Row(3, "c"), Row(4, "d")))
-    }
-  }
-
-  test("SPARK-36680: Supports Dynamic Table Options for Insert Replace") {
-    val t1 = s"${catalogAndNamespace}table"
-    withTable(t1) {
-      sql(s"CREATE TABLE $t1 (id bigint, data string) USING $v2Format")
-      sql(s"INSERT INTO $t1 WITH (`write.split-size` = 10) VALUES (1, 'a'), (2, 'b')")
-
-      val df = sql(s"INSERT INTO $t1 WITH (`write.split-size` = 10) " +
-        s"REPLACE WHERE TRUE " +
-        s"VALUES (3, 'c'), (4, 'd')")
-      val collected = df.queryExecution.optimizedPlan.collect {
-        case CommandResult(_,
-          OverwriteByExpression(relation: DataSourceV2Relation, _, _, _, _, _, _),
-          _, _) =>
-          assert(relation.options.get("write.split-size") == "10")
-      }
-      assert (collected.size == 1)
-
-      val insertResult = sql(s"SELECT * FROM $t1")
-      checkAnswer(insertResult, Seq(Row(3, "c"), Row(4, "d")))
     }
   }
 

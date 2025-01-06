@@ -28,6 +28,7 @@ from dataclasses import dataclass, asdict
 from pyspark.sql import Row
 from pyspark.sql import functions as F
 from pyspark.errors import (
+    AnalysisException,
     ParseException,
     PySparkTypeError,
     PySparkValueError,
@@ -1129,17 +1130,10 @@ class TypesTestsMixin:
     def test_cast_to_udt_with_udt(self):
         row = Row(point=ExamplePoint(1.0, 2.0), python_only_point=PythonOnlyPoint(1.0, 2.0))
         df = self.spark.createDataFrame([row])
-        result = df.select(F.col("point").cast(PythonOnlyUDT())).collect()
-        self.assertEqual(
-            result,
-            [Row(point=PythonOnlyPoint(1.0, 2.0))],
-        )
-
-        result = df.select(F.col("python_only_point").cast(ExamplePointUDT())).collect()
-        self.assertEqual(
-            result,
-            [Row(python_only_point=ExamplePoint(1.0, 2.0))],
-        )
+        with self.assertRaises(AnalysisException):
+            df.select(F.col("point").cast(PythonOnlyUDT())).collect()
+        with self.assertRaises(AnalysisException):
+            df.select(F.col("python_only_point").cast(ExamplePointUDT())).collect()
 
     def test_struct_type(self):
         struct1 = StructType().add("f1", StringType(), True).add("f2", StringType(), True, None)
@@ -2246,6 +2240,22 @@ class TypesTestsMixin:
             PySparkValueError, lambda: str(VariantVal(bytes([32, 10, 1, 0, 0, 0]), metadata))
         )
 
+    def test_to_ddl(self):
+        schema = StructType().add("a", NullType()).add("b", BooleanType()).add("c", BinaryType())
+        self.assertEqual(schema.toDDL(), "a VOID,b BOOLEAN,c BINARY")
+
+        schema = StructType().add("a", IntegerType()).add("b", StringType())
+        self.assertEqual(schema.toDDL(), "a INT,b STRING")
+
+        schema = StructType().add("a", FloatType()).add("b", LongType(), False)
+        self.assertEqual(schema.toDDL(), "a FLOAT,b BIGINT NOT NULL")
+
+        schema = StructType().add("a", ArrayType(DoubleType()), False).add("b", DateType())
+        self.assertEqual(schema.toDDL(), "a ARRAY<DOUBLE> NOT NULL,b DATE")
+
+        schema = StructType().add("a", TimestampType()).add("b", TimestampNTZType())
+        self.assertEqual(schema.toDDL(), "a TIMESTAMP,b TIMESTAMP_NTZ")
+
     def test_from_ddl(self):
         self.assertEqual(DataType.fromDDL("long"), LongType())
         self.assertEqual(
@@ -2316,7 +2326,7 @@ class TypesTestsMixin:
                 StringType("UTF8_LCASE"),
             )
 
-    def test_infer_array_element_type_with_struct(self):
+    def test_infer_nested_array_element_type_with_struct(self):
         # SPARK-48248: Nested array to respect legacy conf of inferArrayTypeFromFirstElement
         with self.sql_conf(
             {"spark.sql.pyspark.legacy.inferArrayTypeFromFirstElement.enabled": True}
