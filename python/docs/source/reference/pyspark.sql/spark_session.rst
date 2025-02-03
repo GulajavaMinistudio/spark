@@ -44,6 +44,8 @@ See also :class:`SparkSession`.
 .. autosummary::
     :toctree: api/
 
+    SparkSession.addArtifact
+    SparkSession.addArtifacts
     SparkSession.addTag
     SparkSession.catalog
     SparkSession.clearTags
@@ -53,6 +55,7 @@ See also :class:`SparkSession`.
     SparkSession.getActiveSession
     SparkSession.getTags
     SparkSession.interruptAll
+    SparkSession.interruptOperation
     SparkSession.interruptTag
     SparkSession.newSession
     SparkSession.profile
@@ -83,11 +86,8 @@ Spark Connect Only
 .. autosummary::
     :toctree: api/
 
-    SparkSession.addArtifact
-    SparkSession.addArtifacts
     SparkSession.clearProgressHandlers
     SparkSession.client
     SparkSession.copyFromLocalToFs
-    SparkSession.interruptOperation
     SparkSession.registerProgressHandler
     SparkSession.removeProgressHandler

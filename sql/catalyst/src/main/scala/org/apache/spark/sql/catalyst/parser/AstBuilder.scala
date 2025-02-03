@@ -3494,7 +3494,7 @@ class AstBuilder extends DataTypeAstBuilder
   /**
    * Create an [[UnresolvedTableOrView]] from a multi-part identifier.
    */
-  private def createUnresolvedTableOrView(
+  protected def createUnresolvedTableOrView(
       ctx: IdentifierReferenceContext,
       commandName: String,
       allowTempView: Boolean = true): LogicalPlan = withOrigin(ctx) {
@@ -3875,6 +3875,9 @@ class AstBuilder extends DataTypeAstBuilder
   }
 
   override def visitCollationSpec(ctx: CollationSpecContext): String = withOrigin(ctx) {
+    if (!SQLConf.get.objectLevelCollationsEnabled) {
+      throw QueryCompilationErrors.objectLevelCollationsNotEnabledError()
+    }
     val collationName = ctx.identifier.getText
     CollationFactory.fetchCollation(collationName).collationName
   }
@@ -4906,7 +4909,7 @@ class AstBuilder extends DataTypeAstBuilder
   }
 
   /**
-   * Parse a [[AlterColumn]] command to alter a column's property.
+   * Parse a [[AlterColumns]] command to alter a column's property.
    *
    * For example:
    * {{{
@@ -4916,67 +4919,73 @@ class AstBuilder extends DataTypeAstBuilder
    *   ALTER TABLE table1 ALTER COLUMN a.b.c COMMENT 'new comment'
    *   ALTER TABLE table1 ALTER COLUMN a.b.c FIRST
    *   ALTER TABLE table1 ALTER COLUMN a.b.c AFTER x
+   *   ALTER TABLE table1 ALTER COLUMN a.b.c TYPE bigint, x COMMENT 'new comment', y FIRST
    * }}}
    */
   override def visitAlterTableAlterColumn(
       ctx: AlterTableAlterColumnContext): LogicalPlan = withOrigin(ctx) {
-    val action = ctx.alterColumnAction
     val verb = if (ctx.CHANGE != null) "CHANGE" else "ALTER"
-    if (action == null) {
-      operationNotAllowed(
-        s"ALTER TABLE table $verb COLUMN requires a TYPE, a SET/DROP, a COMMENT, or a FIRST/AFTER",
-        ctx)
-    }
-    val dataType = if (action.dataType != null) {
-      Some(typedVisit[DataType](action.dataType))
-    } else {
-      None
-    }
-    val nullable = if (action.setOrDrop != null) {
-      action.setOrDrop.getType match {
-        case SqlBaseParser.SET => Some(false)
-        case SqlBaseParser.DROP => Some(true)
+    val specs = ctx.columns.alterColumnSpec.asScala.map { spec =>
+      val action = spec.alterColumnAction
+      if (action == null) {
+        operationNotAllowed(
+          s"ALTER TABLE table $verb COLUMN requires " +
+          "a TYPE, a SET/DROP, a COMMENT, or a FIRST/AFTER",
+          ctx)
       }
-    } else {
-      None
-    }
-    val comment = if (action.commentSpec != null) {
-      Some(visitCommentSpec(action.commentSpec()))
-    } else {
-      None
-    }
-    val position = if (action.colPosition != null) {
-      Some(UnresolvedFieldPosition(typedVisit[ColumnPosition](action.colPosition)))
-    } else {
-      None
-    }
-    val setDefaultExpression: Option[String] =
-      if (action.defaultExpression != null) {
-        Option(action.defaultExpression()).map(visitDefaultExpression).map(_.originalSQL)
-      } else if (action.dropDefault != null) {
-        Some("")
+      val dataType = if (action.dataType != null) {
+        Some(typedVisit[DataType](action.dataType))
       } else {
         None
       }
-    if (setDefaultExpression.isDefined && !conf.getConf(SQLConf.ENABLE_DEFAULT_COLUMNS)) {
-      throw QueryParsingErrors.defaultColumnNotEnabledError(ctx)
+      val nullable = if (action.setOrDrop != null) {
+        action.setOrDrop.getType match {
+          case SqlBaseParser.SET => Some(false)
+          case SqlBaseParser.DROP => Some(true)
+        }
+      } else {
+        None
+      }
+      val comment = if (action.commentSpec != null) {
+        Some(visitCommentSpec(action.commentSpec()))
+      } else {
+        None
+      }
+      val position = if (action.colPosition != null) {
+        Some(UnresolvedFieldPosition(typedVisit[ColumnPosition](action.colPosition)))
+      } else {
+        None
+      }
+      val setDefaultExpression: Option[String] =
+        if (action.defaultExpression != null) {
+          Option(action.defaultExpression()).map(visitDefaultExpression).map(_.originalSQL)
+        } else if (action.dropDefault != null) {
+          Some("")
+        } else {
+          None
+        }
+      if (setDefaultExpression.isDefined && !conf.getConf(SQLConf.ENABLE_DEFAULT_COLUMNS)) {
+        throw QueryParsingErrors.defaultColumnNotEnabledError(ctx)
+      }
+
+      assert(Seq(dataType, nullable, comment, position, setDefaultExpression)
+        .count(_.nonEmpty) == 1)
+
+      AlterColumnSpec(
+        UnresolvedFieldName(typedVisit[Seq[String]](spec.column)),
+        dataType,
+        nullable,
+        comment,
+        position,
+        setDefaultExpression)
     }
-
-    assert(Seq(dataType, nullable, comment, position, setDefaultExpression)
-      .count(_.nonEmpty) == 1)
-
-    AlterColumn(
+    AlterColumns(
       createUnresolvedTable(ctx.table, s"ALTER TABLE ... $verb COLUMN"),
-      UnresolvedFieldName(typedVisit[Seq[String]](ctx.column)),
-      dataType = dataType,
-      nullable = nullable,
-      comment = comment,
-      position = position,
-      setDefaultExpression = setDefaultExpression)
+      specs.toSeq)
   }
 
   /**
-   * Parse a [[AlterColumn]] command. This is Hive SQL syntax.
+   * Parse a [[AlterColumns]] command. This is Hive SQL syntax.
    *
    * For example:
    * {{{
@@ -5000,15 +5009,16 @@ class AstBuilder extends DataTypeAstBuilder
         Some("please run ALTER COLUMN ... SET/DROP NOT NULL instead"))
     }
 
-    AlterColumn(
+    AlterColumns(
       createUnresolvedTable(ctx.table, "ALTER TABLE ... CHANGE COLUMN"),
-      UnresolvedFieldName(columnNameParts),
-      dataType = Option(ctx.colType().dataType()).map(typedVisit[DataType]),
-      nullable = None,
-      comment = Option(ctx.colType().commentSpec()).map(visitCommentSpec),
-      position = Option(ctx.colPosition).map(
-        pos => UnresolvedFieldPosition(typedVisit[ColumnPosition](pos))),
-      setDefaultExpression = None)
+      Seq(AlterColumnSpec(
+        UnresolvedFieldName(columnNameParts),
+        newDataType = Option(ctx.colType().dataType()).map(typedVisit[DataType]),
+        newNullability = None,
+        newComment = Option(ctx.colType().commentSpec()).map(visitCommentSpec),
+        newPosition = Option(ctx.colPosition).map(
+          pos => UnresolvedFieldPosition(typedVisit[ColumnPosition](pos))),
+        newDefaultExpression = None)))
   }
 
   override def visitHiveReplaceColumns(
@@ -5193,47 +5203,6 @@ class AstBuilder extends DataTypeAstBuilder
         "ALTER TABLE ... SET LOCATION ..."),
       Option(ctx.partitionSpec).map(visitNonOptionalPartitionSpec),
       visitLocationSpec(ctx.locationSpec))
-  }
-
-  /**
-   * Create a [[DescribeColumn]] or [[DescribeRelation]] commands.
-   */
-  override def visitDescribeRelation(ctx: DescribeRelationContext): LogicalPlan = withOrigin(ctx) {
-    val isExtended = ctx.EXTENDED != null || ctx.FORMATTED != null
-    val asJson = ctx.JSON != null
-    if (asJson && !isExtended) {
-      val tableName = ctx.identifierReference.getText.split("\\.").lastOption.getOrElse("table")
-      throw QueryCompilationErrors.describeJsonNotExtendedError(tableName)
-    }
-    val relation = createUnresolvedTableOrView(ctx.identifierReference, "DESCRIBE TABLE")
-    if (ctx.describeColName != null) {
-      if (ctx.partitionSpec != null) {
-        throw QueryParsingErrors.descColumnForPartitionUnsupportedError(ctx)
-      } else if (asJson) {
-        throw QueryCompilationErrors.describeColJsonUnsupportedError()
-      } else {
-        DescribeColumn(
-          relation,
-          UnresolvedAttribute(ctx.describeColName.nameParts.asScala.map(_.getText).toSeq),
-          isExtended)
-      }
-    } else {
-      val partitionSpec = if (ctx.partitionSpec != null) {
-        // According to the syntax, visitPartitionSpec returns `Map[String, Option[String]]`.
-        visitPartitionSpec(ctx.partitionSpec).map {
-          case (key, Some(value)) => key -> value
-          case (key, _) =>
-            throw QueryParsingErrors.emptyPartitionKeyError(key, ctx.partitionSpec)
-        }
-      } else {
-        Map.empty[String, String]
-      }
-      if (asJson) {
-        DescribeRelationJson(relation, partitionSpec, isExtended)
-      } else {
-        DescribeRelation(relation, partitionSpec, isExtended)
-      }
-    }
   }
 
   /**
@@ -6028,17 +5997,6 @@ class AstBuilder extends DataTypeAstBuilder
     if (!SQLConf.get.getConf(SQLConf.OPERATOR_PIPE_SYNTAX_ENABLED)) {
       operationNotAllowed("Operator pipe SQL syntax using |>", ctx)
     }
-    // This helper function adds a table subquery boundary between the new operator to be added
-    // (such as a filter or sort) and the input plan if one does not already exist. This helps the
-    // analyzer behave as if we had added the corresponding SQL clause after a table subquery
-    // containing the input plan.
-    def withSubqueryAlias(): LogicalPlan = left match {
-      case _: SubqueryAlias | _: UnresolvedRelation | _: Join | _: Filter |
-           _: GlobalLimit | _: LocalLimit | _: Offset | _: Sort =>
-        left
-      case _ =>
-        SubqueryAlias(SubqueryAlias.generateSubqueryName(), left)
-    }
     Option(ctx.selectClause).map { c =>
       withSelectQuerySpecification(
         ctx = ctx,
@@ -6082,7 +6040,7 @@ class AstBuilder extends DataTypeAstBuilder
       if (ctx.windowClause() != null) {
         throw QueryParsingErrors.windowClauseInPipeOperatorWhereClauseNotAllowedError(ctx)
       }
-      withWhereClause(c, withSubqueryAlias())
+      withWhereClause(c, PipeOperator(left))
     }.getOrElse(Option(ctx.pivotClause()).map { c =>
       if (ctx.unpivotClause() != null) {
         throw QueryParsingErrors.unpivotWithPivotInFromClauseNotAllowedError(ctx)
@@ -6101,7 +6059,7 @@ class AstBuilder extends DataTypeAstBuilder
       val all = Option(ctx.setQuantifier()).exists(_.ALL != null)
       visitSetOperationImpl(left, plan(ctx.right), all, c.getType)
     }.getOrElse(Option(ctx.queryOrganization).map { c =>
-      withQueryResultClauses(c, withSubqueryAlias(), forPipeOperators = true)
+      withQueryResultClauses(c, PipeOperator(left), forPipeOperators = true)
     }.getOrElse(
       visitOperatorPipeAggregate(ctx, left)
     ))))))))))))

@@ -62,6 +62,8 @@ case class SingleStatement(parsedPlan: LogicalPlan)
  * @param label Label set to CompoundBody by user or UUID otherwise.
  *              It can be None in case when CompoundBody is not part of BeginEndCompoundBlock
  *              for example when CompoundBody is inside loop or conditional block.
+ * @param isScope Flag indicating if the CompoundBody is a labeled scope.
+ *                Scopes are used for grouping local variables and exception handlers.
  */
 case class CompoundBody(
     collection: Seq[CompoundPlanStatement],
@@ -79,9 +81,9 @@ case class CompoundBody(
 /**
  * Logical operator for IF ELSE statement.
  * @param conditions Collection of conditions. First condition corresponds to IF clause,
- *                   while others (if any) correspond to following ELSE IF clauses.
+ *                   while others (if any) correspond to following ELSEIF clauses.
  * @param conditionalBodies Collection of bodies that have a corresponding condition,
- *                          in IF or ELSE IF branches.
+ *                          in IF or ELSEIF branches.
  * @param elseBody Body that is executed if none of the conditions are met,
  *                          i.e. ELSE branch.
  */

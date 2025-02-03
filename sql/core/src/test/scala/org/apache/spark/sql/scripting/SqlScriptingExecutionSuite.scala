@@ -17,6 +17,8 @@
 
 package org.apache.spark.sql.scripting
 
+import scala.collection.mutable.ListBuffer
+
 import org.apache.spark.SparkConf
 import org.apache.spark.sql.{QueryTest, Row}
 import org.apache.spark.sql.catalyst.expressions.Expression
@@ -43,7 +45,15 @@ class SqlScriptingExecutionSuite extends QueryTest with SharedSparkSession {
       args: Map[String, Expression] = Map.empty): Seq[Array[Row]] = {
     val compoundBody = spark.sessionState.sqlParser.parsePlan(sqlText).asInstanceOf[CompoundBody]
     val sse = new SqlScriptingExecution(compoundBody, spark, args)
-    sse.map { df => df.collect() }.toList
+    val result: ListBuffer[Array[Row]] = ListBuffer.empty
+
+    var df = sse.getNextResult
+    while (df.isDefined) {
+      // Collect results from the current DataFrame.
+      result.append(df.get.collect())
+      df = sse.getNextResult
+    }
+    result.toSeq
   }
 
   private def verifySqlScriptResult(sqlText: String, expected: Seq[Seq[Row]]): Unit = {
@@ -208,14 +218,14 @@ class SqlScriptingExecutionSuite extends QueryTest with SharedSparkSession {
     verifySqlScriptResult(commands, expected)
   }
 
-  test("if else if going in else if") {
+  test("if elseif going in elseif") {
     val commands =
       """
         |BEGIN
         |  IF 1=2
         |  THEN
         |    SELECT 42;
-        |  ELSE IF 1=1
+        |  ELSEIF 1=1
         |  THEN
         |    SELECT 43;
         |  ELSE
@@ -243,14 +253,14 @@ class SqlScriptingExecutionSuite extends QueryTest with SharedSparkSession {
     verifySqlScriptResult(commands, expected)
   }
 
-  test("if else if going in else") {
+  test("if elseif going in else") {
     val commands =
       """
         |BEGIN
         |  IF 1=2
         |  THEN
         |    SELECT 42;
-        |  ELSE IF 1=3
+        |  ELSEIF 1=3
         |  THEN
         |    SELECT 43;
         |  ELSE
@@ -282,7 +292,7 @@ class SqlScriptingExecutionSuite extends QueryTest with SharedSparkSession {
     }
   }
 
-  test("if else if with count") {
+  test("if elseif with count") {
     withTable("t") {
       val commands =
         """
@@ -292,7 +302,7 @@ class SqlScriptingExecutionSuite extends QueryTest with SharedSparkSession {
           |  INSERT INTO t VALUES (1, 'a', 1.0);
           |  IF (SELECT COUNT(*) > 2 FROM t) THEN
           |    SELECT 42;
-          |  ELSE IF (SELECT COUNT(*) > 1 FROM t) THEN
+          |  ELSEIF (SELECT COUNT(*) > 1 FROM t) THEN
           |    SELECT 43;
           |  ELSE
           |    SELECT 44;

@@ -21,11 +21,12 @@ import java.util
 
 import org.apache.spark.SparkException
 import org.apache.spark.internal.Logging
-import org.apache.spark.sql.{DataFrame, Dataset, Row, SparkSession}
+import org.apache.spark.sql.Row
 import org.apache.spark.sql.catalyst.analysis.{NameParameterizedQuery, UnresolvedAttribute, UnresolvedIdentifier}
 import org.apache.spark.sql.catalyst.expressions.{Alias, CreateArray, CreateMap, CreateNamedStruct, Expression, Literal}
 import org.apache.spark.sql.catalyst.plans.logical.{CreateVariable, DefaultValueExpression, DropVariable, LogicalPlan, OneRowRelation, Project, SetVariable}
 import org.apache.spark.sql.catalyst.trees.{Origin, WithOrigin}
+import org.apache.spark.sql.classic.{DataFrame, Dataset, SparkSession}
 import org.apache.spark.sql.errors.SqlScriptingErrors
 import org.apache.spark.sql.types.BooleanType
 
@@ -181,7 +182,8 @@ class NoOpStatementExec extends LeafStatementExec {
  * @param label
  *   Label set by user to CompoundBody or None otherwise.
  * @param isScope
- *   Flag that indicates whether Compound Body is scope or not.
+ *   Flag indicating if the CompoundBody is a labeled scope.
+ *   Scopes are used for grouping local variables and exception handlers.
  * @param context
  *   SqlScriptingExecutionContext keeps the execution state of current script.
  */
@@ -342,9 +344,9 @@ class CompoundBodyExec(
 /**
  * Executable node for IfElseStatement.
  * @param conditions Collection of executable conditions. First condition corresponds to IF clause,
- *                   while others (if any) correspond to following ELSE IF clauses.
+ *                   while others (if any) correspond to following ELSEIF clauses.
  * @param conditionalBodies Collection of executable bodies that have a corresponding condition,
-*                 in IF or ELSE IF branches.
+*                 in IF or ELSEIF branches.
  * @param elseBody Body that is executed if none of the conditions are met,
  *                          i.e. ELSE branch.
  * @param session Spark session that SQL script is executed within.
@@ -378,7 +380,7 @@ class IfElseStatementExec(
           } else {
             clauseIdx += 1
             if (clauseIdx < conditionsCount) {
-              // There are ELSE IF clauses remaining.
+              // There are ELSEIF clauses remaining.
               state = IfElseState.Condition
               curr = Some(conditions(clauseIdx))
             } else if (elseBody.isDefined) {
