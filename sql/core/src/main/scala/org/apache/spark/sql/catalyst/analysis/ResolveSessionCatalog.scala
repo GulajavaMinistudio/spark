@@ -54,11 +54,6 @@ class ResolveSessionCatalog(val catalogManager: CatalogManager)
   import org.apache.spark.sql.execution.datasources.v2.DataSourceV2Implicits._
 
   override def apply(plan: LogicalPlan): LogicalPlan = plan.resolveOperatorsUp {
-    case _ if ResolveDefaultStringTypes.needsResolution(plan) =>
-      // if there are still unresolved string types in the plan
-      // we should not try to resolve it
-      plan
-
     case AddColumns(ResolvedV1TableIdentifier(ident), cols) =>
       cols.foreach { c =>
         if (c.name.length > 1) {
@@ -704,7 +699,8 @@ class ResolveSessionCatalog(val catalogManager: CatalogManager)
     val builder = new MetadataBuilder
     col.comment.foreach(builder.putString("comment", _))
     col.default.map {
-      value: String => builder.putString(DefaultCols.CURRENT_DEFAULT_COLUMN_METADATA_KEY, value)
+      value: DefaultValueExpression => builder.putString(
+        DefaultCols.CURRENT_DEFAULT_COLUMN_METADATA_KEY, value.originalSQL)
     }
     StructField(col.name.head, col.dataType, nullable = true, builder.build())
   }

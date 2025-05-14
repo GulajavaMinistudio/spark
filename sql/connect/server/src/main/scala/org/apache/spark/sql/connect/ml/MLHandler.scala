@@ -17,12 +17,14 @@
 
 package org.apache.spark.sql.connect.ml
 
+import scala.collection.mutable
 import scala.jdk.CollectionConverters.CollectionHasAsScala
 
 import org.apache.spark.connect.proto
 import org.apache.spark.internal.Logging
-import org.apache.spark.ml.Model
+import org.apache.spark.ml.{EstimatorUtils, Model}
 import org.apache.spark.ml.param.{ParamMap, Params}
+import org.apache.spark.ml.tree.TreeConfig
 import org.apache.spark.ml.util.{MLWritable, Summary}
 import org.apache.spark.sql.DataFrame
 import org.apache.spark.sql.connect.common.LiteralValueProtoConverter
@@ -41,11 +43,17 @@ private class AttributeHelper(
     val sessionHolder: SessionHolder,
     val objRef: String,
     val methods: Array[Method]) {
-  protected lazy val instance = sessionHolder.mlCache.get(objRef)
+  protected def instance(): Object = {
+    val obj = sessionHolder.mlCache.get(objRef)
+    if (obj == null) {
+      throw MLCacheInvalidException(s"object $objRef")
+    }
+    obj
+  }
   // Get the attribute by reflection
   def getAttribute: Any = {
     assert(methods.length >= 1)
-    methods.foldLeft(instance) { (obj, m) =>
+    methods.foldLeft(instance()) { (obj, m) =>
       if (m.argValues.isEmpty) {
         MLUtils.invokeMethodAllowed(obj, m.name)
       } else {
@@ -64,7 +72,7 @@ private class ModelAttributeHelper(
 
   def transform(relation: proto.MlRelation.Transform): DataFrame = {
     // Create a copied model to avoid concurrently modify model params.
-    val model = instance.asInstanceOf[Model[_]]
+    val model = instance().asInstanceOf[Model[_]]
     val copiedModel = model.copy(ParamMap.empty).asInstanceOf[Model[_]]
     MLUtils.setInstanceParams(copiedModel, relation.getParams)
     val inputDF = MLUtils.parseRelationProto(relation.getInput, sessionHolder)
@@ -109,24 +117,70 @@ private[connect] object MLHandler extends Logging {
       mlCommand: proto.MlCommand): proto.MlCommandResult = {
 
     val mlCache = sessionHolder.mlCache
+    val memoryControlEnabled = sessionHolder.mlCache.getMemoryControlEnabled
+
+    if (memoryControlEnabled) {
+      val maxModelSize = sessionHolder.mlCache.getModelMaxSize
+
+      // Note: Tree training stops early when the growing tree model exceeds
+      //  `TreeConfig.trainingEarlyStopModelSizeThresholdInBytes`, to ensure the final
+      // model size is lower than `maxModelSize`, set early-stop threshold to
+      // half of `maxModelSize`, because in each tree training iteration, the tree
+      // nodes will grow up to 2 times, the additional 0.5 is for buffer
+      // because the in-memory size is not exactly in direct proportion to the tree nodes.
+      TreeConfig.trainingEarlyStopModelSizeThresholdInBytes = (maxModelSize.toDouble / 2.5).toLong
+    }
 
     mlCommand.getCommandCase match {
       case proto.MlCommand.CommandCase.FIT =>
         val fitCmd = mlCommand.getFit
         val estimatorProto = fitCmd.getEstimator
-        assert(estimatorProto.getType == proto.MlOperator.OperatorType.ESTIMATOR)
+        assert(estimatorProto.getType == proto.MlOperator.OperatorType.OPERATOR_TYPE_ESTIMATOR)
 
         val dataset = MLUtils.parseRelationProto(fitCmd.getDataset, sessionHolder)
         val estimator =
           MLUtils.getEstimator(sessionHolder, estimatorProto, Some(fitCmd.getParams))
+
+        if (memoryControlEnabled) {
+          try {
+            val estimatedModelSize = estimator.estimateModelSize(dataset)
+            mlCache.checkModelSize(estimatedModelSize)
+          } catch {
+            case _: UnsupportedOperationException => ()
+          }
+          if (estimator.getClass.getName == "org.apache.spark.ml.fpm.FPGrowth") {
+            throw MlUnsupportedException(
+              "FPGrowth algorithm is not supported " +
+                "if Spark Connect model cache offloading is enabled.")
+          }
+          if (estimator.getClass.getName == "org.apache.spark.ml.clustering.LDA"
+            && estimator
+              .asInstanceOf[org.apache.spark.ml.clustering.LDA]
+              .getOptimizer
+              .toLowerCase() == "em") {
+            throw MlUnsupportedException(
+              "LDA algorithm with 'em' optimizer is not supported " +
+                "if Spark Connect model cache offloading is enabled.")
+          }
+        }
+
+        EstimatorUtils.warningMessagesBuffer.set(new mutable.ArrayBuffer[String]())
         val model = estimator.fit(dataset).asInstanceOf[Model[_]]
         val id = mlCache.register(model)
+
+        val fitWarningMessage = if (EstimatorUtils.warningMessagesBuffer.get().length > 0) {
+          EstimatorUtils.warningMessagesBuffer.get().mkString("\n")
+        } else { null }
+        EstimatorUtils.warningMessagesBuffer.set(null)
+        val opInfo = proto.MlCommandResult.MlOperatorInfo
+          .newBuilder()
+          .setObjRef(proto.ObjectRef.newBuilder().setId(id))
+        if (fitWarningMessage != null) {
+          opInfo.setWarningMessage(fitWarningMessage)
+        }
         proto.MlCommandResult
           .newBuilder()
-          .setOperatorInfo(
-            proto.MlCommandResult.MlOperatorInfo
-              .newBuilder()
-              .setObjRef(proto.ObjectRef.newBuilder().setId(id)))
+          .setOperatorInfo(opInfo)
           .build()
 
       case proto.MlCommand.CommandCase.FETCH =>
@@ -149,9 +203,7 @@ private[connect] object MLHandler extends Logging {
                   .setObjRef(proto.ObjectRef.newBuilder().setId(id)))
               .build()
           case a: Array[_] if a.nonEmpty && a.forall(_.isInstanceOf[Model[_]]) =>
-            val ids = a.map { m =>
-              mlCache.register(m.asInstanceOf[Model[_]])
-            }
+            val ids = a.map(m => mlCache.register(m.asInstanceOf[Model[_]]))
             proto.MlCommandResult
               .newBuilder()
               .setOperatorInfo(
@@ -165,15 +217,33 @@ private[connect] object MLHandler extends Logging {
         }
 
       case proto.MlCommand.CommandCase.DELETE =>
-        val objId = mlCommand.getDelete.getObjRef.getId
-        var result = false
-        if (!objId.contains(".")) {
-          mlCache.remove(objId)
-          result = true
+        val ids = mutable.ArrayBuilder.make[String]
+        mlCommand.getDelete.getObjRefsList.asScala.toArray.foreach { objId =>
+          if (!objId.getId.contains(".")) {
+            if (mlCache.remove(objId.getId)) {
+              ids += objId.getId
+            }
+          }
         }
         proto.MlCommandResult
           .newBuilder()
-          .setParam(LiteralValueProtoConverter.toLiteralProto(result))
+          .setOperatorInfo(
+            proto.MlCommandResult.MlOperatorInfo
+              .newBuilder()
+              .setObjRef(proto.ObjectRef.newBuilder().setId(ids.result().mkString(","))))
+          .build()
+
+      case proto.MlCommand.CommandCase.CLEAN_CACHE =>
+        val size = mlCache.clear()
+        proto.MlCommandResult
+          .newBuilder()
+          .setParam(LiteralValueProtoConverter.toLiteralProto(size))
+          .build()
+
+      case proto.MlCommand.CommandCase.GET_CACHE_INFO =>
+        proto.MlCommandResult
+          .newBuilder()
+          .setParam(LiteralValueProtoConverter.toLiteralProto(mlCache.getInfo()))
           .build()
 
       case proto.MlCommand.CommandCase.WRITE =>
@@ -197,21 +267,21 @@ private[connect] object MLHandler extends Logging {
             val params = Some(writer.getParams)
 
             operatorType match {
-              case proto.MlOperator.OperatorType.ESTIMATOR =>
+              case proto.MlOperator.OperatorType.OPERATOR_TYPE_ESTIMATOR =>
                 val estimator = MLUtils.getEstimator(sessionHolder, writer.getOperator, params)
                 estimator match {
                   case writable: MLWritable => MLUtils.write(writable, mlCommand.getWrite)
                   case other => throw MlUnsupportedException(s"Estimator $other is not writable")
                 }
 
-              case proto.MlOperator.OperatorType.EVALUATOR =>
+              case proto.MlOperator.OperatorType.OPERATOR_TYPE_EVALUATOR =>
                 val evaluator = MLUtils.getEvaluator(sessionHolder, writer.getOperator, params)
                 evaluator match {
                   case writable: MLWritable => MLUtils.write(writable, mlCommand.getWrite)
                   case other => throw MlUnsupportedException(s"Evaluator $other is not writable")
                 }
 
-              case proto.MlOperator.OperatorType.TRANSFORMER =>
+              case proto.MlOperator.OperatorType.OPERATOR_TYPE_TRANSFORMER =>
                 val transformer =
                   MLUtils.getTransformer(sessionHolder, writer.getOperator, params)
                 transformer match {
@@ -232,7 +302,7 @@ private[connect] object MLHandler extends Logging {
         val name = operator.getName
         val path = mlCommand.getRead.getPath
 
-        if (operator.getType == proto.MlOperator.OperatorType.MODEL) {
+        if (operator.getType == proto.MlOperator.OperatorType.OPERATOR_TYPE_MODEL) {
           val model = MLUtils.loadTransformer(sessionHolder, name, path)
           val id = mlCache.register(model)
           return proto.MlCommandResult
@@ -244,18 +314,21 @@ private[connect] object MLHandler extends Logging {
                 .setUid(model.uid)
                 .setParams(Serializer.serializeParams(model)))
             .build()
-
         }
 
-        val mlOperator = if (operator.getType == proto.MlOperator.OperatorType.ESTIMATOR) {
-          MLUtils.loadEstimator(sessionHolder, name, path).asInstanceOf[Params]
-        } else if (operator.getType == proto.MlOperator.OperatorType.EVALUATOR) {
-          MLUtils.loadEvaluator(sessionHolder, name, path).asInstanceOf[Params]
-        } else if (operator.getType == proto.MlOperator.OperatorType.TRANSFORMER) {
-          MLUtils.loadTransformer(sessionHolder, name, path).asInstanceOf[Params]
-        } else {
-          throw MlUnsupportedException(s"${operator.getType} read not supported")
-        }
+        val mlOperator =
+          if (operator.getType ==
+              proto.MlOperator.OperatorType.OPERATOR_TYPE_ESTIMATOR) {
+            MLUtils.loadEstimator(sessionHolder, name, path).asInstanceOf[Params]
+          } else if (operator.getType ==
+              proto.MlOperator.OperatorType.OPERATOR_TYPE_EVALUATOR) {
+            MLUtils.loadEvaluator(sessionHolder, name, path).asInstanceOf[Params]
+          } else if (operator.getType ==
+              proto.MlOperator.OperatorType.OPERATOR_TYPE_TRANSFORMER) {
+            MLUtils.loadTransformer(sessionHolder, name, path).asInstanceOf[Params]
+          } else {
+            throw MlUnsupportedException(s"${operator.getType} read not supported")
+          }
 
         proto.MlCommandResult
           .newBuilder()
@@ -270,7 +343,7 @@ private[connect] object MLHandler extends Logging {
       case proto.MlCommand.CommandCase.EVALUATE =>
         val evalCmd = mlCommand.getEvaluate
         val evalProto = evalCmd.getEvaluator
-        assert(evalProto.getType == proto.MlOperator.OperatorType.EVALUATOR)
+        assert(evalProto.getType == proto.MlOperator.OperatorType.OPERATOR_TYPE_EVALUATOR)
 
         val dataset = MLUtils.parseRelationProto(evalCmd.getDataset, sessionHolder)
         val evaluator =
@@ -295,7 +368,7 @@ private[connect] object MLHandler extends Logging {
             val transformProto = relation.getTransform
             assert(
               transformProto.getTransformer.getType ==
-                proto.MlOperator.OperatorType.TRANSFORMER)
+                proto.MlOperator.OperatorType.OPERATOR_TYPE_TRANSFORMER)
             val dataset = MLUtils.parseRelationProto(transformProto.getInput, sessionHolder)
             val transformer = MLUtils.getTransformer(sessionHolder, transformProto)
             transformer.transform(dataset)
@@ -323,5 +396,4 @@ private[connect] object MLHandler extends Logging {
       case other => throw MlUnsupportedException(s"$other not supported")
     }
   }
-
 }

@@ -14,7 +14,6 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 #
-
 import os
 import tempfile
 import unittest
@@ -23,7 +22,7 @@ import numpy as np
 
 from pyspark.ml.evaluation import BinaryClassificationEvaluator
 from pyspark.ml.linalg import Vectors
-from pyspark.ml.classification import LogisticRegression
+from pyspark.ml.classification import LogisticRegression, RandomForestClassifier
 from pyspark.ml.tuning import (
     ParamGridBuilder,
     CrossValidator,
@@ -31,6 +30,7 @@ from pyspark.ml.tuning import (
     TrainValidationSplit,
     TrainValidationSplitModel,
 )
+from pyspark.ml.util import _SPARKML_TEMP_DFS_PATH
 from pyspark.sql.functions import rand
 from pyspark.testing.sqlutils import ReusedSQLTestCase
 
@@ -71,18 +71,28 @@ class TuningTestsMixin:
         evaluation_score = evaluator.evaluate(tvs_model.transform(dataset))
         self.assertTrue(np.isclose(evaluation_score, 0.8333333333333333, atol=1e-4))
 
+        with tempfile.TemporaryDirectory(prefix="ml_tmp_dir") as d:
+            os.environ[_SPARKML_TEMP_DFS_PATH] = d
+            try:
+                tvs_model2 = tvs.fit(dataset)
+                assert len(os.listdir(d)) == 0
+                self.assertTrue(np.isclose(tvs_model2.validationMetrics[0], 0.5, atol=1e-4))
+                self.assertTrue(
+                    np.isclose(tvs_model2.validationMetrics[1], 0.8857142857142857, atol=1e-4)
+                )
+            finally:
+                os.environ.pop(_SPARKML_TEMP_DFS_PATH, None)
+
         # save & load
         with tempfile.TemporaryDirectory(prefix="train_validation_split") as d:
-            path1 = os.path.join(d, "tvs")
-            tvs.write().save(path1)
-            tvs2 = TrainValidationSplit.load(path1)
+            tvs.write().overwrite().save(d)
+            tvs2 = TrainValidationSplit.load(d)
             self.assertEqual(str(tvs), str(tvs2))
             self.assertEqual(str(tvs.getEstimator()), str(tvs2.getEstimator()))
             self.assertEqual(str(tvs.getEvaluator()), str(tvs2.getEvaluator()))
 
-            path2 = os.path.join(d, "tvsm")
-            tvs_model.write().save(path2)
-            model2 = TrainValidationSplitModel.load(path2)
+            tvs_model.write().overwrite().save(d)
+            model2 = TrainValidationSplitModel.load(d)
             self.assertEqual(str(tvs_model), str(model2))
             self.assertEqual(str(tvs_model.getEstimator()), str(model2.getEstimator()))
             self.assertEqual(str(tvs_model.getEvaluator()), str(model2.getEvaluator()))
@@ -121,6 +131,15 @@ class TuningTestsMixin:
         self.assertEqual(model.getEstimatorParamMaps(), grid)
         self.assertTrue(np.isclose(model.avgMetrics[0], 0.5, atol=1e-4))
 
+        with tempfile.TemporaryDirectory(prefix="ml_tmp_dir") as d:
+            os.environ[_SPARKML_TEMP_DFS_PATH] = d
+            try:
+                model2 = cv.fit(dataset)
+                assert len(os.listdir(d)) == 0
+                self.assertTrue(np.isclose(model2.avgMetrics[0], 0.5, atol=1e-4))
+            finally:
+                os.environ.pop(_SPARKML_TEMP_DFS_PATH, None)
+
         output = model.transform(dataset)
         self.assertEqual(
             output.columns, ["features", "label", "rawPrediction", "probability", "prediction"]
@@ -142,24 +161,21 @@ class TuningTestsMixin:
 
         # save & load
         with tempfile.TemporaryDirectory(prefix="cv") as d:
-            path1 = os.path.join(d, "cv")
-            cv.write().save(path1)
-            cv2 = CrossValidator.load(path1)
+            cv.write().overwrite().save(d)
+            cv2 = CrossValidator.load(d)
             self.assertEqual(str(cv), str(cv2))
             self.assertEqual(str(cv.getEstimator()), str(cv2.getEstimator()))
             self.assertEqual(str(cv.getEvaluator()), str(cv2.getEvaluator()))
 
-            path2 = os.path.join(d, "cv_model")
-            model.write().save(path2)
-            model2 = CrossValidatorModel.load(path2)
+            model.write().overwrite().save(d)
+            model2 = CrossValidatorModel.load(d)
             checkSubModels(model2.subModels)
             self.assertEqual(str(model), str(model2))
             self.assertEqual(str(model.getEstimator()), str(model2.getEstimator()))
             self.assertEqual(str(model.getEvaluator()), str(model2.getEvaluator()))
 
-            path2 = os.path.join(d, "cv_model2")
-            model.write().option("persistSubModels", "false").save(path2)
-            cvModel2 = CrossValidatorModel.load(path2)
+            model.write().overwrite().option("persistSubModels", "false").save(d)
+            cvModel2 = CrossValidatorModel.load(d)
             self.assertEqual(cvModel2.subModels, None)
 
             model3 = model2.copy()
@@ -235,6 +251,28 @@ class TuningTestsMixin:
         )
         with self.assertRaisesRegex(Exception, "The validation data at fold 3 is empty"):
             cv.fit(dataset_with_folds)
+
+    def test_crossvalidator_with_random_forest_classifier(self):
+        dataset = self.spark.createDataFrame(
+            [
+                (Vectors.dense(1.0, 2.0), 0),
+                (Vectors.dense(2.0, 3.0), 1),
+                (Vectors.dense(1.5, 2.5), 0),
+                (Vectors.dense(3.0, 4.0), 1),
+                (Vectors.dense(1.1, 2.1), 0),
+                (Vectors.dense(2.5, 3.5), 1),
+            ],
+            ["features", "label"],
+        )
+        rf = RandomForestClassifier(labelCol="label", featuresCol="features")
+        evaluator = BinaryClassificationEvaluator(labelCol="label")
+        paramGrid = (
+            ParamGridBuilder().addGrid(rf.maxDepth, [2]).addGrid(rf.numTrees, [5, 10]).build()
+        )
+        cv = CrossValidator(
+            estimator=rf, estimatorParamMaps=paramGrid, evaluator=evaluator, numFolds=3
+        )
+        cv.fit(dataset)
 
 
 class TuningTests(TuningTestsMixin, ReusedSQLTestCase):
