@@ -20,7 +20,7 @@ package org.apache.spark.sql.execution.datasources.v2
 import scala.jdk.CollectionConverters._
 
 import org.apache.spark.{SparkEnv, SparkException, TaskContext}
-import org.apache.spark.internal.{Logging, LogKeys, MDC}
+import org.apache.spark.internal.{Logging, LogKeys}
 import org.apache.spark.rdd.RDD
 import org.apache.spark.sql.catalyst.{InternalRow, ProjectingInternalRow}
 import org.apache.spark.sql.catalyst.analysis.NoSuchTableException
@@ -31,9 +31,11 @@ import org.apache.spark.sql.catalyst.util.RowDeltaUtils.{DELETE_OPERATION, INSER
 import org.apache.spark.sql.connector.catalog.{CatalogV2Util, Column, Identifier, StagedTable, StagingTableCatalog, Table, TableCatalog, TableInfo, TableWritePrivilege}
 import org.apache.spark.sql.connector.expressions.Transform
 import org.apache.spark.sql.connector.metric.CustomMetric
-import org.apache.spark.sql.connector.write.{BatchWrite, DataWriter, DataWriterFactory, DeltaWrite, DeltaWriter, PhysicalWriteInfoImpl, Write, WriterCommitMessage}
+import org.apache.spark.sql.connector.write.{BatchWrite, DataWriter, DataWriterFactory, DeltaWrite, DeltaWriter, MergeSummaryImpl, PhysicalWriteInfoImpl, RowLevelOperationTable, Write, WriterCommitMessage, WriteSummary}
 import org.apache.spark.sql.errors.{QueryCompilationErrors, QueryExecutionErrors}
 import org.apache.spark.sql.execution.{SparkPlan, SQLExecution, UnaryExecNode}
+import org.apache.spark.sql.execution.adaptive.AdaptiveSparkPlanHelper
+import org.apache.spark.sql.execution.joins.BaseJoinExec
 import org.apache.spark.sql.execution.metric.{CustomMetrics, SQLMetric, SQLMetrics}
 import org.apache.spark.sql.types.StructType
 import org.apache.spark.util.{LongAccumulator, Utils}
@@ -152,7 +154,7 @@ case class ReplaceTableAsSelectExec(
     tableSpec: TableSpec,
     writeOptions: Map[String, String],
     orCreate: Boolean,
-    invalidateCache: (TableCatalog, Table, Identifier) => Unit)
+    invalidateCache: (TableCatalog, Identifier) => Unit)
   extends V2CreateTableAsSelectBaseExec {
 
   val properties = CatalogV2Util.convertTableProperties(tableSpec)
@@ -167,8 +169,7 @@ case class ReplaceTableAsSelectExec(
     // 2. Writing to the new table fails,
     // 3. The table returned by catalog.createTable doesn't support writing.
     if (catalog.tableExists(ident)) {
-      val table = catalog.loadTable(ident)
-      invalidateCache(catalog, table, ident)
+      invalidateCache(catalog, ident)
       catalog.dropTable(ident)
     } else if (!orCreate) {
       throw QueryCompilationErrors.cannotReplaceMissingTableError(ident)
@@ -204,7 +205,7 @@ case class AtomicReplaceTableAsSelectExec(
     tableSpec: TableSpec,
     writeOptions: Map[String, String],
     orCreate: Boolean,
-    invalidateCache: (TableCatalog, Table, Identifier) => Unit)
+    invalidateCache: (TableCatalog, Identifier) => Unit)
   extends V2CreateTableAsSelectBaseExec {
 
   val properties = CatalogV2Util.convertTableProperties(tableSpec)
@@ -215,8 +216,7 @@ case class AtomicReplaceTableAsSelectExec(
   override protected def run(): Seq[InternalRow] = {
     val columns = getV2Columns(query.schema, catalog.useNullableQuerySchema)
     if (catalog.tableExists(ident)) {
-      val table = catalog.loadTable(ident)
-      invalidateCache(catalog, table, ident)
+      invalidateCache(catalog, ident)
     }
     val staged = if (orCreate) {
       val tableInfo = new TableInfo.Builder()
@@ -303,8 +303,6 @@ case class ReplaceDataExec(
     projections: ReplaceDataProjections,
     write: Write) extends V2ExistingTableWriteExec {
 
-  override val stringArgs: Iterator[Any] = Iterator(query, write)
-
   override def writingTask: WritingSparkTask[_] = {
     projections match {
       case ReplaceDataProjections(dataProj, Some(metadataProj)) =>
@@ -328,8 +326,6 @@ case class WriteDeltaExec(
     projections: WriteDeltaProjections,
     write: DeltaWrite) extends V2ExistingTableWriteExec {
 
-  override lazy val stringArgs: Iterator[Any] = Iterator(query, write)
-
   override lazy val writingTask: WritingSparkTask[_] = {
     if (projections.metadataProjection.isDefined) {
       DeltaWithMetadataWritingSparkTask(projections)
@@ -349,6 +345,8 @@ case class WriteToDataSourceV2Exec(
     query: SparkPlan,
     writeMetrics: Seq[CustomMetric]) extends V2TableWriteExec {
 
+  override val stringArgs: Iterator[Any] = Iterator(batchWrite, query)
+
   override val customMetrics: Map[String, SQLMetric] = writeMetrics.map { customMetric =>
     customMetric.name() -> SQLMetrics.createV2CustomMetric(sparkContext, customMetric)
   }.toMap
@@ -366,6 +364,8 @@ case class WriteToDataSourceV2Exec(
 trait V2ExistingTableWriteExec extends V2TableWriteExec {
   def refreshCache: () => Unit
   def write: Write
+
+  override val stringArgs: Iterator[Any] = Iterator(query, write)
 
   override val customMetrics: Map[String, SQLMetric] =
     write.supportedCustomMetrics().map { customMetric =>
@@ -398,7 +398,7 @@ trait V2ExistingTableWriteExec extends V2TableWriteExec {
 /**
  * The base physical plan for writing data into data source v2.
  */
-trait V2TableWriteExec extends V2CommandExec with UnaryExecNode {
+trait V2TableWriteExec extends V2CommandExec with UnaryExecNode with AdaptiveSparkPlanHelper {
   def query: SparkPlan
   def writingTask: WritingSparkTask[_] = DataWritingSparkTask
 
@@ -432,7 +432,7 @@ trait V2TableWriteExec extends V2CommandExec with UnaryExecNode {
 
     logInfo(log"Start processing data source write support: " +
       log"${MDC(LogKeys.BATCH_WRITE, batchWrite)}. The input RDD has " +
-      log"${MDC(LogKeys.COUNT, messages.length)}} partitions.")
+      log"${MDC(LogKeys.COUNT, messages.length)} partitions.")
 
     // Avoid object not serializable issue.
     val writeMetrics: Map[String, SQLMetric] = customMetrics
@@ -451,8 +451,12 @@ trait V2TableWriteExec extends V2CommandExec with UnaryExecNode {
         }
       )
 
+      val writeSummary = getWriteSummary(query)
       logInfo(log"Data source write support ${MDC(LogKeys.BATCH_WRITE, batchWrite)} is committing.")
-      batchWrite.commit(messages)
+      writeSummary match {
+        case Some(summary) => batchWrite.commit(messages, summary)
+        case None => batchWrite.commit(messages)
+      }
       logInfo(log"Data source write support ${MDC(LogKeys.BATCH_WRITE, batchWrite)} committed.")
       commitProgress = Some(StreamWriterCommitProgress(totalNumRowsAccumulator.value))
     } catch {
@@ -473,6 +477,58 @@ trait V2TableWriteExec extends V2CommandExec with UnaryExecNode {
     }
 
     Nil
+  }
+
+  private def getWriteSummary(query: SparkPlan): Option[WriteSummary] = {
+    collectFirst(query) { case m: MergeRowsExec => m }.map { n =>
+      val metrics = n.metrics
+      val numSourceRows = getNumSourceRows(n)
+      MergeSummaryImpl(
+        numSourceRows,
+        metrics.get("numTargetRowsCopied").map(_.value).getOrElse(-1L),
+        metrics.get("numTargetRowsDeleted").map(_.value).getOrElse(-1L),
+        metrics.get("numTargetRowsUpdated").map(_.value).getOrElse(-1L),
+        metrics.get("numTargetRowsInserted").map(_.value).getOrElse(-1L),
+        metrics.get("numTargetRowsMatchedUpdated").map(_.value).getOrElse(-1L),
+        metrics.get("numTargetRowsMatchedDeleted").map(_.value).getOrElse(-1L),
+        metrics.get("numTargetRowsNotMatchedBySourceUpdated").map(_.value).getOrElse(-1L),
+        metrics.get("numTargetRowsNotMatchedBySourceDeleted").map(_.value).getOrElse(-1L)
+      )
+    }
+  }
+
+  private def getNumSourceRows(mergeRowsExec: MergeRowsExec): Long = {
+    def hasTargetTable(plan: SparkPlan): Boolean = {
+      collectFirst(plan) {
+        case scan @ BatchScanExec(_, _, _, _, _: RowLevelOperationTable, _) => scan
+      }.isDefined
+    }
+
+    def findSourceScan(join: BaseJoinExec): Option[SparkPlan] = {
+      val leftHasTarget = hasTargetTable(join.left)
+      val rightHasTarget = hasTargetTable(join.right)
+
+      val sourceSide = if (leftHasTarget) {
+        Some(join.right)
+      } else if (rightHasTarget) {
+        Some(join.left)
+      } else {
+        None
+      }
+
+      sourceSide.flatMap { side =>
+        collectFirst(side) {
+          case source if source.metrics.contains("numOutputRows") =>
+          source
+        }
+      }
+    }
+
+    (for {
+      join <- collectFirst(mergeRowsExec.child) { case j: BaseJoinExec => j }
+      sourceScan <- findSourceScan(join)
+      metric <- sourceScan.metrics.get("numOutputRows")
+    } yield metric.value).getOrElse(-1L)
   }
 }
 

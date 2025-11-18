@@ -25,6 +25,7 @@ from typing import IO, List, Iterator, Iterable, Tuple, Union
 
 from pyspark.accumulators import _accumulatorRegistry
 from pyspark.errors import PySparkAssertionError, PySparkRuntimeError
+from pyspark.logger.worker_io import capture_outputs
 from pyspark.serializers import (
     read_bool,
     read_int,
@@ -175,11 +176,14 @@ def write_read_func_and_partitions(
     data_source: DataSource,
     schema: StructType,
     max_arrow_batch_size: int,
+    binary_as_bytes: bool,
 ) -> None:
     is_streaming = isinstance(reader, DataSourceStreamReader)
 
     # Create input converter.
-    converter = ArrowTableToRowsConversion._create_converter(BinaryType())
+    converter = ArrowTableToRowsConversion._create_converter(
+        BinaryType(), none_on_identity=False, binary_as_bytes=binary_as_bytes
+    )
 
     # Create output converter.
     return_type = schema
@@ -195,7 +199,7 @@ def write_read_func_and_partitions(
                 f"but found {batch.num_columns} columns and {batch.num_rows} rows."
             )
             columns = [column.to_pylist() for column in batch.columns]
-            partition_bytes = converter(columns[0][0])
+            partition_bytes = converter(columns[0][0])  # type: ignore[misc]
 
         assert (
             partition_bytes is not None
@@ -284,6 +288,7 @@ def main(infile: IO, outfile: IO) -> None:
     via the socket.
     """
     faulthandler_log_path = os.environ.get("PYTHON_FAULTHANDLER_DIR", None)
+    tracebackDumpIntervalSeconds = os.environ.get("PYTHON_TRACEBACK_DUMP_INTERVAL_SECONDS", None)
     try:
         if faulthandler_log_path:
             faulthandler_log_path = os.path.join(faulthandler_log_path, str(os.getpid()))
@@ -291,6 +296,9 @@ def main(infile: IO, outfile: IO) -> None:
             faulthandler.enable(file=faulthandler_log_file)
 
         check_python_version(infile)
+
+        if tracebackDumpIntervalSeconds is not None and int(tracebackDumpIntervalSeconds) > 0:
+            faulthandler.dump_traceback_later(int(tracebackDumpIntervalSeconds), repeat=True)
 
         memory_limit_mb = int(os.environ.get("PYSPARK_PLANNER_MEMORY_MB", "-1"))
         setup_memory_limits(memory_limit_mb)
@@ -348,45 +356,49 @@ def main(infile: IO, outfile: IO) -> None:
         enable_pushdown = read_bool(infile)
 
         is_streaming = read_bool(infile)
+        binary_as_bytes = read_bool(infile)
 
-        # Instantiate data source reader.
-        if is_streaming:
-            reader: Union[DataSourceReader, DataSourceStreamReader] = _streamReader(
-                data_source, schema
-            )
-        else:
-            reader = data_source.reader(schema=schema)
-            # Validate the reader.
-            if not isinstance(reader, DataSourceReader):
-                raise PySparkAssertionError(
-                    errorClass="DATA_SOURCE_TYPE_MISMATCH",
-                    messageParameters={
-                        "expected": "an instance of DataSourceReader",
-                        "actual": f"'{type(reader).__name__}'",
-                    },
+        with capture_outputs():
+            # Instantiate data source reader.
+            if is_streaming:
+                reader: Union[DataSourceReader, DataSourceStreamReader] = _streamReader(
+                    data_source, schema
                 )
-            is_pushdown_implemented = (
-                getattr(reader.pushFilters, "__func__", None) is not DataSourceReader.pushFilters
-            )
-            if is_pushdown_implemented and not enable_pushdown:
-                # Do not silently ignore pushFilters when pushdown is disabled.
-                # Raise an error to ask the user to enable pushdown.
-                raise PySparkAssertionError(
-                    errorClass="DATA_SOURCE_PUSHDOWN_DISABLED",
-                    messageParameters={
-                        "type": type(reader).__name__,
-                        "conf": "spark.sql.python.filterPushdown.enabled",
-                    },
+            else:
+                reader = data_source.reader(schema=schema)
+                # Validate the reader.
+                if not isinstance(reader, DataSourceReader):
+                    raise PySparkAssertionError(
+                        errorClass="DATA_SOURCE_TYPE_MISMATCH",
+                        messageParameters={
+                            "expected": "an instance of DataSourceReader",
+                            "actual": f"'{type(reader).__name__}'",
+                        },
+                    )
+                is_pushdown_implemented = (
+                    getattr(reader.pushFilters, "__func__", None)
+                    is not DataSourceReader.pushFilters
                 )
+                if is_pushdown_implemented and not enable_pushdown:
+                    # Do not silently ignore pushFilters when pushdown is disabled.
+                    # Raise an error to ask the user to enable pushdown.
+                    raise PySparkAssertionError(
+                        errorClass="DATA_SOURCE_PUSHDOWN_DISABLED",
+                        messageParameters={
+                            "type": type(reader).__name__,
+                            "conf": "spark.sql.python.filterPushdown.enabled",
+                        },
+                    )
 
-        # Send the read function and partitions to the JVM.
-        write_read_func_and_partitions(
-            outfile,
-            reader=reader,
-            data_source=data_source,
-            schema=schema,
-            max_arrow_batch_size=max_arrow_batch_size,
-        )
+            # Send the read function and partitions to the JVM.
+            write_read_func_and_partitions(
+                outfile,
+                reader=reader,
+                data_source=data_source,
+                schema=schema,
+                max_arrow_batch_size=max_arrow_batch_size,
+                binary_as_bytes=binary_as_bytes,
+            )
     except BaseException as e:
         handle_worker_exception(e, outfile)
         sys.exit(-1)
@@ -405,6 +417,9 @@ def main(infile: IO, outfile: IO) -> None:
         # write a different value to tell JVM to not reuse this worker
         write_int(SpecialLengths.END_OF_DATA_SECTION, outfile)
         sys.exit(-1)
+
+    # Force to cancel dump_traceback_later
+    faulthandler.cancel_dump_traceback_later()
 
 
 if __name__ == "__main__":

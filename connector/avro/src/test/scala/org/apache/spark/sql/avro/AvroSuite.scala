@@ -32,7 +32,6 @@ import org.apache.avro.Schema.Type._
 import org.apache.avro.file.{DataFileReader, DataFileWriter}
 import org.apache.avro.generic.{GenericData, GenericDatumReader, GenericDatumWriter, GenericRecord}
 import org.apache.avro.generic.GenericData.{EnumSymbol, Fixed}
-import org.apache.commons.io.FileUtils
 
 import org.apache.spark.{SPARK_VERSION_SHORT, SparkConf, SparkException, SparkRuntimeException, SparkThrowable, SparkUpgradeException}
 import org.apache.spark.TestUtils.assertExceptionMsg
@@ -640,7 +639,7 @@ abstract class AvroSuite
 
   private def createDummyCorruptFile(dir: File): Unit = {
     Utils.tryWithResource {
-      FileUtils.forceMkdir(dir)
+      Files.createDirectories(dir.toPath)
       val corruptFile = new File(dir, "corrupt.avro")
       new BufferedWriter(new FileWriter(corruptFile))
     } { writer =>
@@ -760,12 +759,12 @@ abstract class AvroSuite
       spark.conf.set(SQLConf.AVRO_COMPRESSION_CODEC.key, ZSTANDARD.lowerCaseName())
       df.write.format("avro").save(zstandardDir)
 
-      val uncompressSize = FileUtils.sizeOfDirectory(new File(uncompressDir))
-      val bzip2Size = FileUtils.sizeOfDirectory(new File(bzip2Dir))
-      val xzSize = FileUtils.sizeOfDirectory(new File(xzDir))
-      val deflateSize = FileUtils.sizeOfDirectory(new File(deflateDir))
-      val snappySize = FileUtils.sizeOfDirectory(new File(snappyDir))
-      val zstandardSize = FileUtils.sizeOfDirectory(new File(zstandardDir))
+      val uncompressSize = Utils.sizeOf(new File(uncompressDir))
+      val bzip2Size = Utils.sizeOf(new File(bzip2Dir))
+      val xzSize = Utils.sizeOf(new File(xzDir))
+      val deflateSize = Utils.sizeOf(new File(deflateDir))
+      val snappySize = Utils.sizeOf(new File(snappyDir))
+      val zstandardSize = Utils.sizeOf(new File(zstandardDir))
 
       assert(uncompressSize > deflateSize)
       assert(snappySize > deflateSize)
@@ -1424,6 +1423,61 @@ abstract class AvroSuite
     }
   }
 
+  test("to_avro with reordered fields and nullable target succeeds") {
+    // Test that when Catalyst and Avro field orders differ, null values
+    // are correctly validated against the mapped Avro field's nullability
+    val avroSchema = """{
+      "type": "record",
+      "name": "ReorderedRecord",
+      "fields": [
+        {"name": "a", "type": ["null", "string"]},
+        {"name": "b", "type": "string"}
+      ]
+    }"""
+
+    // Catalyst has fields in order [b, a], Avro has [a, b]
+    // Pass null for 'a' which is nullable in Avro - should succeed
+    val df = Seq(("B", null.asInstanceOf[String])).toDF("b", "a")
+      .select(struct($"b", $"a").as("s"))
+    val result = df.select(avro.functions.to_avro($"s", avroSchema).as("avro"))
+
+    // Should succeed without throwing AVRO_CANNOT_WRITE_NULL_FIELD
+    val collected = result.collect()
+    assert(collected.length == 1)
+
+    // Verify data correctness by round-tripping through from_avro
+    val roundTrip = result.select(avro.functions.from_avro($"avro", avroSchema).as("s"))
+    // final field order should be [a, b] as per avro schema
+    checkAnswer(roundTrip, Row(Row(null, "B")))
+  }
+
+  test("to_avro with reordered fields fails with correct field name") {
+    // Test that when Catalyst and Avro field orders differ and we try to write
+    // null to a non-nullable field, the error message references the correct field name
+    val avroSchema = """{
+      "type": "record",
+      "name": "ReorderedRecord",
+      "fields": [
+        {"name": "a", "type": ["null", "string"]},
+        {"name": "b", "type": "string"}
+      ]
+    }"""
+
+    // Catalyst has fields in order [b, a], Avro has [a, b]
+    // Pass null for 'b' which is non-nullable in Avro - should fail with correct field name 'b'
+    val df = Seq((null.asInstanceOf[String], "A")).toDF("b", "a")
+      .select(struct($"b", $"a").as("s"))
+
+    checkError(
+      exception = intercept[SparkRuntimeException] {
+        df.select(avro.functions.to_avro($"s", avroSchema)).collect()
+      },
+      condition = "AVRO_CANNOT_WRITE_NULL_FIELD",
+      parameters = Map(
+        "name" -> "`b`",
+        "dataType" -> "\"string\""))
+  }
+
   test("support user provided avro schema for writing nullable fixed type") {
     withTempPath { tempDir =>
       val avroSchema =
@@ -1875,7 +1929,7 @@ abstract class AvroSuite
 
     intercept[FileNotFoundException] {
       withTempDir { dir =>
-        FileUtils.touch(new File(dir, "test"))
+        Utils.touch(new File(dir, "test"))
         withSQLConf(AvroFileFormat.IgnoreFilesWithoutExtensionProperty -> "true") {
           spark.read.format("avro").load(dir.toString)
         }
@@ -1884,7 +1938,7 @@ abstract class AvroSuite
 
     intercept[FileNotFoundException] {
       withTempDir { dir =>
-        FileUtils.touch(new File(dir, "test"))
+        Utils.touch(new File(dir, "test"))
 
         spark
           .read
@@ -1899,7 +1953,7 @@ abstract class AvroSuite
     withTempPath { tempDir =>
       val tempEmptyDir = s"$tempDir/sqlOverwrite"
       // Create a temp directory for table that will be overwritten
-      new File(tempEmptyDir).mkdirs()
+      Utils.createDirectory(tempEmptyDir)
       spark.sql(
         s"""
            |CREATE TEMPORARY VIEW episodes
@@ -3093,6 +3147,26 @@ abstract class AvroSuite
     assert(AvroOptions.isValidOption("enableStableIdentifiersForUnionType"))
     assert(AvroOptions.isValidOption("stableIdentifierPrefixForUnionType"))
     assert(AvroOptions.isValidOption("recursiveFieldMaxDepth"))
+  }
+
+  test("SPARK-53973: boolean Avro options reject non-boolean values") {
+    Seq(
+      AvroOptions.STABLE_ID_FOR_UNION_TYPE,
+      AvroOptions.POSITIONAL_FIELD_MATCHING,
+      AvroOptions.IGNORE_EXTENSION
+    ).foreach { opt =>
+      val e = intercept[AnalysisException] {
+        AvroOptions(Map(opt -> "not_bool"))
+      }
+      checkError(
+        exception = e,
+        condition = "STDS_INVALID_OPTION_VALUE.WITH_MESSAGE",
+        parameters = Map(
+          "optionName" -> opt,
+          "message" -> "Cannot cast value 'not_bool' to Boolean."
+        )
+      )
+    }
   }
 
   test("SPARK-46633: read file with empty blocks") {

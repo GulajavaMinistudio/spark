@@ -67,12 +67,12 @@ trait SparkConnectServerTest extends SharedSparkSession {
     super.afterAll()
   }
 
-  override def beforeEach(): Unit = {
+  protected override def beforeEach(): Unit = {
     super.beforeEach()
     clearAllExecutions()
   }
 
-  override def afterEach(): Unit = {
+  protected override def afterEach(): Unit = {
     clearAllExecutions()
     super.afterEach()
   }
@@ -141,6 +141,21 @@ trait SparkConnectServerTest extends SharedSparkSession {
 
   protected def buildPlan(query: String) = {
     proto.Plan.newBuilder().setRoot(dsl.sql(query)).build()
+  }
+
+  protected def buildSqlCommandPlan(sqlCommand: String) = {
+    proto.Plan
+      .newBuilder()
+      .setCommand(
+        proto.Command
+          .newBuilder()
+          .setSqlCommand(
+            proto.SqlCommand
+              .newBuilder()
+              .setSql(sqlCommand)
+              .build())
+          .build())
+      .build()
   }
 
   protected def buildLocalRelation[A <: Product: TypeTag](data: Seq[A]) = {

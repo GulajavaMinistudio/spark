@@ -41,7 +41,7 @@ import org.apache.spark.sql.catalyst.catalog.SQLFunction.parseDefault
 import org.apache.spark.sql.catalyst.expressions.{Alias, Attribute, AttributeReference, Cast, Expression, ExpressionInfo, LateralSubquery, NamedArgumentExpression, NamedExpression, OuterReference, ScalarSubquery, UpCast}
 import org.apache.spark.sql.catalyst.parser.{CatalystSqlParser, ParserInterface}
 import org.apache.spark.sql.catalyst.plans.Inner
-import org.apache.spark.sql.catalyst.plans.logical.{FunctionSignature, InputParameter, LateralJoin, LocalRelation, LogicalPlan, NamedParametersSupport, OneRowRelation, Project, SubqueryAlias, View}
+import org.apache.spark.sql.catalyst.plans.logical.{FunctionSignature, InputParameter, LateralJoin, LogicalPlan, NamedParametersSupport, OneRowRelation, Project, SubqueryAlias, View}
 import org.apache.spark.sql.catalyst.trees.CurrentOrigin
 import org.apache.spark.sql.catalyst.util.{CharVarcharUtils, StringUtils}
 import org.apache.spark.sql.connector.catalog.CatalogManager
@@ -268,7 +268,8 @@ class SessionCatalog(
 
   private def requireTableExists(name: TableIdentifier): Unit = {
     if (!tableExists(name)) {
-      throw new NoSuchTableException(db = name.database.get, table = name.table)
+      throw new NoSuchTableException(
+        Seq(name.catalog.get, name.database.get, name.table))
     }
   }
 
@@ -484,6 +485,7 @@ class SessionCatalog(
    *
    * @param identifier TableIdentifier
    * @param newDataSchema Updated data schema to be used for the table
+   * @deprecated since 4.1.0 use `alterTableSchema` instead.
    */
   def alterTableDataSchema(
       identifier: TableIdentifier,
@@ -505,6 +507,25 @@ class SessionCatalog(
     }
 
     externalCatalog.alterTableDataSchema(db, table, newDataSchema)
+  }
+
+  /**
+   * Alter the schema of a table identified by the provided table identifier. All partition columns
+   * must be preserved.
+   *
+   * @param identifier TableIdentifier
+   * @param newSchema Updated schema to be used for the table
+   */
+  def alterTableSchema(
+      identifier: TableIdentifier,
+      newSchema: StructType): Unit = {
+    val qualifiedIdent = qualifyIdentifier(identifier)
+    val db = qualifiedIdent.database.get
+    val table = qualifiedIdent.table
+    requireDbExists(db)
+    requireTableExists(qualifiedIdent)
+
+    externalCatalog.alterTableSchema(db, table, newSchema)
   }
 
   private def columnNameResolved(
@@ -725,6 +746,13 @@ class SessionCatalog(
    */
   def getLocalOrGlobalTempView(name: TableIdentifier): Option[View] = {
     getRawLocalOrGlobalTempView(toNameParts(name)).map(getTempViewPlan)
+  }
+
+  /**
+   * Generate a [[View]] operator from the local or global temporary view stored.
+   */
+  def getLocalOrGlobalTempView(name: Seq[String]): Option[View] = {
+    getRawLocalOrGlobalTempView(name).map(getTempViewPlan)
   }
 
   /**
@@ -982,7 +1010,13 @@ class SessionCatalog(
       objectType = Some("VIEW"),
       objectName = Some(metadata.qualifiedName)
     )
-    val parsedPlan = SQLConf.withExistingConf(View.effectiveSQLConf(viewConfigs, isTempView)) {
+    val parsedPlan = SQLConf.withExistingConf(
+      View.effectiveSQLConf(
+        configs = viewConfigs,
+        isTempView = isTempView,
+        createSparkVersion = metadata.createVersion
+      )
+    ) {
         CurrentOrigin.withOrigin(origin) {
           parser.parseQuery(viewText)
         }
@@ -997,7 +1031,16 @@ class SessionCatalog(
           // output is the same with the view output.
           metadata.schema.fieldNames.toImmutableArraySeq
         } else {
-          assert(metadata.viewQueryColumnNames.length == metadata.schema.length)
+          assert(metadata.viewQueryColumnNames.length == metadata.schema.length,
+            "Corrupted view metadata detected for view " +
+            metadata.identifier.quotedString + ". " +
+            "The number of view query column names " +
+            metadata.viewQueryColumnNames.length + " " +
+            "does not match the number of columns in the view schema " +
+            metadata.schema.length + ". " +
+            "View query column names: [" + metadata.viewQueryColumnNames.mkString(", ") + "], " +
+            "View schema columns: [" + metadata.schema.fieldNames.mkString(", ") + "]. " +
+            "This indicates corrupted view metadata that needs to be repaired.")
           metadata.viewQueryColumnNames
         }
 
@@ -1010,7 +1053,11 @@ class SessionCatalog(
         // Note that, the column names may have duplication, e.g. `CREATE VIEW v(x, y) AS
         // SELECT 1 col, 2 col`. We need to make sure that the matching attributes have the same
         // number of duplications, and pick the corresponding attribute by ordinal.
-        val viewConf = View.effectiveSQLConf(metadata.viewSQLConfigs, isTempView)
+        val viewConf = View.effectiveSQLConf(
+          configs = metadata.viewSQLConfigs,
+          isTempView = isTempView,
+          createSparkVersion = metadata.createVersion
+        )
         val normalizeColName: String => String = if (viewConf.caseSensitiveAnalysis) {
           identity
         } else {
@@ -1459,7 +1506,12 @@ class SessionCatalog(
     requireDbExists(db)
     val newFuncDefinition = funcDefinition.copy(identifier = qualifiedIdent)
     if (!functionExists(qualifiedIdent)) {
-      externalCatalog.createFunction(db, newFuncDefinition)
+      try {
+        externalCatalog.createFunction(db, newFuncDefinition)
+      } catch {
+        case e: FunctionAlreadyExistsException if ignoreIfExists =>
+          // Ignore the exception as ignoreIfNotExists is set to true
+      }
     } else if (!ignoreIfExists) {
       throw new FunctionAlreadyExistsException(Seq(db, qualifiedIdent.funcName))
     }
@@ -1481,6 +1533,8 @@ class SessionCatalog(
         // For a permanent function, because we loaded it to the FunctionRegistry
         // when it's first used, we also need to drop it from the FunctionRegistry.
         functionRegistry.dropFunction(qualifiedIdent)
+      } else if (tableFunctionRegistry.functionExists(qualifiedIdent)) {
+        tableFunctionRegistry.dropFunction(qualifiedIdent)
       }
       externalCatalog.dropFunction(db, funcName)
     } else if (!ignoreIfNotExists) {
@@ -1609,17 +1663,23 @@ class SessionCatalog(
         .putString("__funcInputAlias", "true")
         .build()
     }
-    assert(!function.isTableFunc)
+    assert(!function.isTableFunc,
+      "Function '" + function.name + "' is a table function. " +
+      "Use makeSQLTableFunctionPlan() instead of makeSQLFunctionPlan().")
     val funcName = function.name.funcName
 
     // Use captured SQL configs when parsing a SQL function.
     val conf = new SQLConf()
     function.getSQLConfigs.foreach { case (k, v) => conf.settings.put(k, v) }
+    Analyzer.trySetAnsiValue(conf)
     SQLConf.withExistingConf(conf) {
       val inputParam = function.inputParam
       val returnType = function.getScalarFuncReturnType
       val (expression, query) = function.getExpressionAndQuery(parser, isTableFunc = false)
-      assert(expression.isDefined || query.isDefined)
+      assert(expression.isDefined || query.isDefined,
+        "SQL function '" + function.name + "' could not be parsed. " +
+        "Neither expression nor query could be extracted from function body. " +
+        "exprText=" + function.exprText + ", queryText=" + function.queryText + ".")
 
       // Check function arguments
       val paramSize = inputParam.map(_.size).getOrElse(0)
@@ -1646,7 +1706,14 @@ class SessionCatalog(
 
         paddedInput.zip(param.fields).map {
           case (expr, param) =>
-            Alias(Cast(expr, param.dataType), param.name)(
+            // Add outer references to all resolved attributes and outer references in the function
+            // input. Outer references also need to be wrapped because the function input may
+            // already contain outer references.
+            val outer = expr.transform {
+              case a: Attribute if a.resolved => OuterReference(a)
+              case o: OuterReference => OuterReference(o)
+            }
+            Alias(Cast(outer, param.dataType), param.name)(
               qualifier = qualifier,
               // mark the alias as function input
               explicitMetadata = Some(metaForFuncInputAlias))
@@ -1654,8 +1721,7 @@ class SessionCatalog(
       }.getOrElse(Nil)
 
       val body = if (query.isDefined) ScalarSubquery(query.get) else expression.get
-      Project(Alias(Cast(body, returnType), funcName)() :: Nil,
-        Project(inputs, LocalRelation(inputs.flatMap(_.references))))
+      Project(Alias(Cast(body, returnType), funcName)() :: Nil, Project(inputs, OneRowRelation()))
     }
   }
 
@@ -1702,12 +1768,17 @@ class SessionCatalog(
       function: SQLFunction,
       input: Seq[Expression],
       outputAttrs: Seq[Attribute]): LogicalPlan = {
-    assert(function.isTableFunc)
+    assert(function.isTableFunc,
+      "Function '" + function.name + "' is a scalar function. " +
+      "Use makeSQLFunctionPlan() instead of makeSQLTableFunctionPlan().")
     val funcName = function.name.funcName
     val inputParam = function.inputParam
     val returnParam = function.getTableFuncReturnCols
     val (_, query) = function.getExpressionAndQuery(parser, isTableFunc = true)
-    assert(query.isDefined)
+    assert(query.isDefined,
+      "SQL table function '" + function.name + "' could not be parsed. " +
+      "Query could not be extracted from function body. " +
+      "queryText=" + function.queryText + ".")
 
     // Check function arguments
     val paramSize = inputParam.map(_.size).getOrElse(0)
@@ -1746,7 +1817,12 @@ class SessionCatalog(
       query.get
     }
 
-    assert(returnParam.length == outputAttrs.length)
+    assert(returnParam.length == outputAttrs.length,
+      "SQL table function '" + function.name + "' has mismatched return columns. " +
+      "Expected " + outputAttrs.length + " output attributes but found " +
+      returnParam.length + " return parameters. " +
+      "Return parameters: [" + returnParam.fieldNames.mkString(", ") + "], " +
+      "Output attributes: [" + outputAttrs.map(_.name).mkString(", ") + "].")
     val output = returnParam.fields.zipWithIndex.map { case (param, i) =>
       // Since we cannot get the output of a unresolved logical plan, we need
       // to reference the output column of the lateral join by its position.
@@ -1892,7 +1968,7 @@ class SessionCatalog(
       }
 
     NamedParametersSupport.defaultRearrange(
-      FunctionSignature(paramNames), expressions, functionName)
+      FunctionSignature(paramNames), expressions, functionName, SQLConf.get.resolver)
   }
 
   /**
@@ -2329,7 +2405,9 @@ class SessionCatalog(
     requireTableNotExists(newName)
     val oldTable = getTableMetadata(oldName)
     if (oldTable.tableType == CatalogTableType.MANAGED) {
-      assert(oldName.database.nonEmpty)
+      assert(oldName.database.nonEmpty,
+        "Table identifier " + oldName.quotedString + " is missing database name. " +
+        "Managed tables must have a database defined.")
       val databaseLocation =
         externalCatalog.getDatabase(oldName.database.get).locationUri
       val newTableLocation = new Path(new Path(databaseLocation), format(newName.table))

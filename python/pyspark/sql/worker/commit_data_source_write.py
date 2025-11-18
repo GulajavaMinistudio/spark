@@ -21,6 +21,7 @@ from typing import IO
 
 from pyspark.accumulators import _accumulatorRegistry
 from pyspark.errors import PySparkAssertionError
+from pyspark.logger.worker_io import capture_outputs
 from pyspark.serializers import (
     read_bool,
     read_int,
@@ -49,6 +50,7 @@ def main(infile: IO, outfile: IO) -> None:
     writer instance, given a list of commit messages.
     """
     faulthandler_log_path = os.environ.get("PYTHON_FAULTHANDLER_DIR", None)
+    tracebackDumpIntervalSeconds = os.environ.get("PYTHON_TRACEBACK_DUMP_INTERVAL_SECONDS", None)
     try:
         if faulthandler_log_path:
             faulthandler_log_path = os.path.join(faulthandler_log_path, str(os.getpid()))
@@ -56,6 +58,9 @@ def main(infile: IO, outfile: IO) -> None:
             faulthandler.enable(file=faulthandler_log_file)
 
         check_python_version(infile)
+
+        if tracebackDumpIntervalSeconds is not None and int(tracebackDumpIntervalSeconds) > 0:
+            faulthandler.dump_traceback_later(int(tracebackDumpIntervalSeconds), repeat=True)
 
         memory_limit_mb = int(os.environ.get("PYSPARK_PLANNER_MEMORY_MB", "-1"))
         setup_memory_limits(memory_limit_mb)
@@ -87,12 +92,13 @@ def main(infile: IO, outfile: IO) -> None:
         # Receive a boolean to indicate whether to invoke `abort`.
         abort = read_bool(infile)
 
-        # Commit or abort the Python data source write.
-        # Note the commit messages can be None if there are failed tasks.
-        if abort:
-            writer.abort(commit_messages)
-        else:
-            writer.commit(commit_messages)
+        with capture_outputs():
+            # Commit or abort the Python data source write.
+            # Note the commit messages can be None if there are failed tasks.
+            if abort:
+                writer.abort(commit_messages)
+            else:
+                writer.commit(commit_messages)
 
         # Send a status code back to JVM.
         write_int(0, outfile)
@@ -115,6 +121,9 @@ def main(infile: IO, outfile: IO) -> None:
         # write a different value to tell JVM to not reuse this worker
         write_int(SpecialLengths.END_OF_DATA_SECTION, outfile)
         sys.exit(-1)
+
+    # Force to cancel dump_traceback_later
+    faulthandler.cancel_dump_traceback_later()
 
 
 if __name__ == "__main__":

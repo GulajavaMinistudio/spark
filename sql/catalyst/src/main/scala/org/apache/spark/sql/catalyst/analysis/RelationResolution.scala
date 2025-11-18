@@ -17,6 +17,8 @@
 
 package org.apache.spark.sql.catalyst.analysis
 
+import scala.collection.mutable
+
 import org.apache.spark.internal.Logging
 import org.apache.spark.sql.AnalysisException
 import org.apache.spark.sql.catalyst.SQLConfHelper
@@ -49,7 +51,12 @@ class RelationResolution(override val catalogManager: CatalogManager)
     with Logging
     with LookupCatalog
     with SQLConfHelper {
+
+  type CacheKey = (Seq[String], Option[TimeTravelSpec])
+
   val v1SessionCatalog = catalogManager.v1SessionCatalog
+
+  private def relationCache: mutable.Map[CacheKey, LogicalPlan] = AnalysisContext.get.relationCache
 
   /**
    * If we are resolving database objects (relations, functions, etc.) inside views, we may need to
@@ -107,12 +114,9 @@ class RelationResolution(override val catalogManager: CatalogManager)
     ).orElse {
       expandIdentifier(u.multipartIdentifier) match {
         case CatalogAndIdentifier(catalog, ident) =>
-          val key =
-            (
-              (catalog.name +: ident.namespace :+ ident.name).toImmutableArraySeq,
-              finalTimeTravelSpec
-            )
-          AnalysisContext.get.relationCache
+          val key = toCacheKey(catalog, ident, finalTimeTravelSpec)
+          val planId = u.getTagValue(LogicalPlan.PLAN_ID_TAG)
+          relationCache
             .get(key)
             .map { cache =>
               val cachedRelation = cache.transform {
@@ -121,13 +125,7 @@ class RelationResolution(override val catalogManager: CatalogManager)
                   newRelation.copyTagsFrom(multi)
                   newRelation
               }
-              u.getTagValue(LogicalPlan.PLAN_ID_TAG)
-                .map { planId =>
-                  val cachedConnectRelation = cachedRelation.clone()
-                  cachedConnectRelation.setTagValue(LogicalPlan.PLAN_ID_TAG, planId)
-                  cachedConnectRelation
-                }
-                .getOrElse(cachedRelation)
+              cloneWithPlanId(cachedRelation, planId)
             }
             .orElse {
               val writePrivilegesString =
@@ -139,18 +137,11 @@ class RelationResolution(override val catalogManager: CatalogManager)
                 ident,
                 table,
                 u.clearWritePrivileges.options,
-                u.isStreaming
+                u.isStreaming,
+                finalTimeTravelSpec
               )
-              loaded.foreach(AnalysisContext.get.relationCache.update(key, _))
-              u.getTagValue(LogicalPlan.PLAN_ID_TAG)
-                .map { planId =>
-                  loaded.map { loadedRelation =>
-                    val loadedConnectRelation = loadedRelation.clone()
-                    loadedConnectRelation.setTagValue(LogicalPlan.PLAN_ID_TAG, planId)
-                    loadedConnectRelation
-                  }
-                }
-                .getOrElse(loaded)
+              loaded.foreach(relationCache.update(key, _))
+              loaded.map(cloneWithPlanId(_, planId))
             }
         case _ => None
       }
@@ -162,7 +153,8 @@ class RelationResolution(override val catalogManager: CatalogManager)
       ident: Identifier,
       table: Option[Table],
       options: CaseInsensitiveStringMap,
-      isStreaming: Boolean): Option[LogicalPlan] = {
+      isStreaming: Boolean,
+      timeTravelSpec: Option[TimeTravelSpec]): Option[LogicalPlan] = {
     table.map {
       // To utilize this code path to execute V1 commands, e.g. INSERT,
       // either it must be session catalog, or tracksPartitionsInCatalog
@@ -189,6 +181,7 @@ class RelationResolution(override val catalogManager: CatalogManager)
 
       case table =>
         if (isStreaming) {
+          assert(timeTravelSpec.isEmpty, "time travel is not allowed in streaming")
           val v1Fallback = table match {
             case withFallback: V2TableWithV1Fallback =>
               Some(UnresolvedCatalogRelation(withFallback.v1Table, isStreaming = true))
@@ -210,7 +203,7 @@ class RelationResolution(override val catalogManager: CatalogManager)
         } else {
           SubqueryAlias(
             catalog.name +: ident.asMultipartIdentifier,
-            DataSourceV2Relation.create(table, Some(catalog), Some(ident), options)
+            DataSourceV2Relation.create(table, Some(catalog), Some(ident), options, timeTravelSpec)
           )
         }
     }
@@ -232,6 +225,45 @@ class RelationResolution(override val catalogManager: CatalogManager)
     }
   }
 
+  def resolveReference(ref: V2TableReference): LogicalPlan = {
+    val relation = getOrLoadRelation(ref)
+    val planId = ref.getTagValue(LogicalPlan.PLAN_ID_TAG)
+    cloneWithPlanId(relation, planId)
+  }
+
+  private def getOrLoadRelation(ref: V2TableReference): LogicalPlan = {
+    val key = toCacheKey(ref.catalog, ref.identifier)
+    relationCache.get(key) match {
+      case Some(cached) =>
+        adaptCachedRelation(cached, ref)
+      case None =>
+        val relation = loadRelation(ref)
+        relationCache.update(key, relation)
+        relation
+    }
+  }
+
+  private def loadRelation(ref: V2TableReference): LogicalPlan = {
+    val table = ref.catalog.loadTable(ref.identifier)
+    V2TableReferenceUtils.validateLoadedTable(table, ref)
+    val tableName = ref.identifier.toQualifiedNameParts(ref.catalog)
+    SubqueryAlias(tableName, ref.toRelation(table))
+  }
+
+  private def adaptCachedRelation(cached: LogicalPlan, ref: V2TableReference): LogicalPlan = {
+    cached transform {
+      case r: DataSourceV2Relation if matchesReference(r, ref) =>
+        V2TableReferenceUtils.validateLoadedTable(r.table, ref)
+        r.copy(output = ref.output, options = ref.options)
+    }
+  }
+
+  private def matchesReference(
+      relation: DataSourceV2Relation,
+      ref: V2TableReference): Boolean = {
+    relation.catalog.contains(ref.catalog) && relation.identifier.contains(ref.identifier)
+  }
+
   private def isResolvingView: Boolean = AnalysisContext.get.catalogAndNamespace.nonEmpty
 
   private def isReferredTempViewName(nameParts: Seq[String]): Boolean = {
@@ -240,6 +272,24 @@ class RelationResolution(override val catalogManager: CatalogManager)
       (n.length == nameParts.length) && n.zip(nameParts).forall {
         case (a, b) => resolver(a, b)
       }
+    }
+  }
+
+  private def toCacheKey(
+      catalog: CatalogPlugin,
+      ident: Identifier,
+      timeTravelSpec: Option[TimeTravelSpec] = None): CacheKey = {
+    ((catalog.name +: ident.namespace :+ ident.name).toImmutableArraySeq, timeTravelSpec)
+  }
+
+  private def cloneWithPlanId(plan: LogicalPlan, planId: Option[Long]): LogicalPlan = {
+    planId match {
+      case Some(id) =>
+        val clone = plan.clone()
+        clone.setTagValue(LogicalPlan.PLAN_ID_TAG, id)
+        clone
+      case None =>
+        plan
     }
   }
 }

@@ -24,8 +24,9 @@ import java.util.Locale
 
 import scala.concurrent.duration.MICROSECONDS
 import scala.jdk.CollectionConverters._
+import scala.util.matching.Regex
 
-import org.apache.spark.{SparkException, SparkRuntimeException, SparkUnsupportedOperationException}
+import org.apache.spark.{SparkConf, SparkException, SparkRuntimeException, SparkUnsupportedOperationException}
 import org.apache.spark.sql._
 import org.apache.spark.sql.catalyst.{InternalRow, QualifiedTableName, TableIdentifier}
 import org.apache.spark.sql.catalyst.CurrentUserContext.CURRENT_USER
@@ -45,7 +46,7 @@ import org.apache.spark.sql.execution.adaptive.AdaptiveSparkPlanHelper
 import org.apache.spark.sql.execution.columnar.InMemoryRelation
 import org.apache.spark.sql.execution.datasources.{HadoopFsRelation, LogicalRelationWithTable}
 import org.apache.spark.sql.execution.datasources.v2.DataSourceV2ScanRelation
-import org.apache.spark.sql.execution.streaming.MemoryStream
+import org.apache.spark.sql.execution.streaming.runtime.MemoryStream
 import org.apache.spark.sql.internal.{SQLConf, StaticSQLConf}
 import org.apache.spark.sql.internal.SQLConf.{PARTITION_OVERWRITE_MODE, PartitionOverwriteMode, V2_SESSION_CATALOG_IMPLEMENTATION}
 import org.apache.spark.sql.sources.SimpleScanSource
@@ -56,6 +57,9 @@ abstract class DataSourceV2SQLSuite
   extends InsertIntoTests(supportsDynamicOverwrite = true, includeSQLOnlyTests = true)
   with DeleteFromTests with DatasourceV2SQLBase with StatsEstimationTestBase
   with AdaptiveSparkPlanHelper {
+
+  override protected def sparkConf: SparkConf =
+    super.sparkConf.set(SQLConf.ANSI_ENABLED, true)
 
   protected val v2Source = classOf[FakeV2ProviderWithCustomSchema].getName
   override protected val v2Format = v2Source
@@ -75,6 +79,48 @@ abstract class DataSourceV2SQLSuite
 
   protected def analysisException(sqlText: String): AnalysisException = {
     intercept[AnalysisException](sql(sqlText))
+  }
+
+  test("EXPLAIN") {
+    val t = "testcat.tbl"
+    withTable(t) {
+      spark.sql(s"CREATE TABLE $t (id int, data string)")
+      checkExplain(
+        query = s"SELECT * FROM $t",
+        relationPattern = raw".*RelationV2\[[^]]*]\s$t$$".r)
+    }
+  }
+
+  test("EXPLAIN with time travel (version)") {
+    val t = "testcat.tbl"
+    val version = "snapshot1"
+    val tWithVersion = t + version
+    withTable(tWithVersion) {
+      spark.sql(s"CREATE TABLE $tWithVersion (id int, data string)")
+      val tableWithVersionPattern = raw"$t\sVERSION\sAS\sOF\s'$version'"
+      val relationPattern = raw".*RelationV2\[[^]]*]\s$tableWithVersionPattern$$".r
+      checkExplain(s"SELECT * FROM $t VERSION AS OF '$version'", relationPattern)
+    }
+  }
+
+  test("EXPLAIN with time travel (timestamp)") {
+    val t = "testcat.tbl"
+    val ts = DateTimeUtils.stringToTimestampAnsi(
+      UTF8String.fromString("2019-01-29 00:37:58"),
+      DateTimeUtils.getZoneId(SQLConf.get.sessionLocalTimeZone))
+    val tWithTs = t + ts
+    withTable(tWithTs) {
+      spark.sql(s"CREATE TABLE $tWithTs (id int, data string)")
+      val tableWithTsPattern = raw"$t\s+TIMESTAMP\s+AS\s+OF\s+$ts"
+      val relationPattern = raw".*RelationV2\[[^]]*]\s$tableWithTsPattern$$".r
+      checkExplain(s"SELECT * FROM $t TIMESTAMP AS OF '2019-01-29 00:37:58'", relationPattern)
+    }
+  }
+
+  private def checkExplain(query: String, relationPattern: Regex): Unit = {
+    val explain = spark.sql(s"EXPLAIN EXTENDED $query").head().getString(0)
+    val relations = explain.split("\n").filter(_.contains("RelationV2"))
+    assert(relations.nonEmpty && relations.forall(line => relationPattern.matches(line.trim)))
   }
 }
 
@@ -645,8 +691,16 @@ class DataSourceV2SQLSuiteV1Filter
       assert(replaced.columns.length === 1,
         "Replaced table should have new schema.")
       val actual = replaced.columns.head
-      val expected = ColumnV2.create("id", LongType, false, null,
-        new ColumnDefaultValue("41 + 1", LiteralValue(42L, LongType)), null)
+      val expected = ColumnV2.create(
+        "id",
+        LongType,
+        false, /* not nullable */
+        null, /* no comment */
+        new ColumnDefaultValue(
+          "41 + 1",
+          LiteralValue(42L, LongType),
+          LiteralValue(42L, LongType)),
+        null /* no metadata */)
       assert(actual === expected,
         "Replaced table should have new schema with DEFAULT column metadata.")
     }
@@ -911,8 +965,14 @@ class DataSourceV2SQLSuiteV1Filter
           checkAnswer(sql(s"SELECT * FROM $view"), spark.table("source").select("id"))
 
           val oldView = spark.table(view)
+          assert(spark.sharedState.cacheManager.numCachedEntries == 1)
           sql(s"REPLACE TABLE $t (a bigint) USING foo")
-          assert(spark.sharedState.cacheManager.lookupCachedData(oldView).isEmpty)
+          // it is no longer valid to materialize oldView as underlying
+          // query execution captured original table before replace
+          // yet cache invalidation must work correctly
+          val e = intercept[AnalysisException] { oldView.collect() }
+          assert(e.message.contains("Table ID has changed"))
+          assert(spark.sharedState.cacheManager.isEmpty)
         }
       }
     }
@@ -1268,8 +1328,8 @@ class DataSourceV2SQLSuiteV1Filter
   test("ShowViews: using v2 catalog, command not supported.") {
     checkError(
       exception = analysisException("SHOW VIEWS FROM testcat"),
-      condition = "_LEGACY_ERROR_TEMP_1184",
-      parameters = Map("plugin" -> "testcat", "ability" -> "views"))
+      condition = "MISSING_CATALOG_ABILITY.VIEWS",
+      parameters = Map("plugin" -> "testcat"))
   }
 
   test("create/replace/alter table - reserved properties") {
@@ -2258,8 +2318,10 @@ class DataSourceV2SQLSuiteV1Filter
         exception = intercept[SparkUnsupportedOperationException] {
           sql(s"UPDATE $t SET name='Robert', age=32 WHERE p=1")
         },
-        condition = "_LEGACY_ERROR_TEMP_2096",
-        parameters = Map("ddl" -> "UPDATE TABLE")
+        condition = "UNSUPPORTED_FEATURE.TABLE_OPERATION",
+        parameters = Map(
+          "tableName" -> "`testcat`.`ns1`.`ns2`.`tbl`",
+          "operation" -> "UPDATE TABLE")
       )
     }
   }
@@ -2364,8 +2426,10 @@ class DataSourceV2SQLSuiteV1Filter
                |WHEN MATCHED AND (target.p > 0) THEN UPDATE SET *
                |WHEN NOT MATCHED THEN INSERT *""".stripMargin)
         },
-        condition = "_LEGACY_ERROR_TEMP_2096",
-        parameters = Map("ddl" -> "MERGE INTO TABLE"))
+        condition = "UNSUPPORTED_FEATURE.TABLE_OPERATION",
+        parameters = Map(
+          "tableName" -> "`testcat`.`ns1`.`ns2`.`target`",
+          "operation" -> "MERGE INTO TABLE"))
     }
   }
 
@@ -2463,8 +2527,8 @@ class DataSourceV2SQLSuiteV1Filter
     val v = "testcat.ns1.ns2.v"
     checkError(
       exception = analysisException(s"CREATE VIEW $v AS SELECT 1"),
-      condition = "_LEGACY_ERROR_TEMP_1184",
-      parameters = Map("plugin" -> "testcat", "ability" -> "views"))
+      condition = "MISSING_CATALOG_ABILITY.VIEWS",
+      parameters = Map("plugin" -> "testcat"))
   }
 
   test("global temp view should not be masked by v2 catalog") {
@@ -3552,18 +3616,109 @@ class DataSourceV2SQLSuiteV1Filter
     }
   }
 
-  test("SPARK-48286: Add new column with default value which is not deterministic") {
+  test("CREATE TABLE with invalid default value") {
+    withSQLConf(SQLConf.DEFAULT_COLUMN_ALLOWED_PROVIDERS.key -> s"$v2Format, ") {
+      withTable("t") {
+        // The default value fails to analyze.
+        checkError(
+          exception = intercept[AnalysisException] {
+            sql(s"create table t(s int default badvalue) using $v2Format")
+          },
+          condition = "INVALID_DEFAULT_VALUE.UNRESOLVED_EXPRESSION",
+          parameters = Map(
+            "statement" -> "CREATE TABLE",
+            "colName" -> "`s`",
+            "defaultValue" -> "badvalue"))
+      }
+    }
+  }
+
+  test("REPLACE TABLE with invalid default value") {
+    withSQLConf(SQLConf.DEFAULT_COLUMN_ALLOWED_PROVIDERS.key -> s"$v2Format, ") {
+      withTable("t") {
+        sql(s"create table t(i boolean) using $v2Format")
+
+        // The default value fails to analyze.
+        checkError(
+          exception = intercept[AnalysisException] {
+            sql(s"replace table t(s int default badvalue) using $v2Format")
+          },
+          condition = "INVALID_DEFAULT_VALUE.UNRESOLVED_EXPRESSION",
+          parameters = Map(
+            "statement" -> "REPLACE TABLE",
+            "colName" -> "`s`",
+            "defaultValue" -> "badvalue"))
+      }
+    }
+  }
+
+  test("SPARK-52116: Create table with default value which is not deterministic") {
+    withSQLConf(SQLConf.DEFAULT_COLUMN_ALLOWED_PROVIDERS.key -> v2Source) {
+      withTable("tab") {
+        val exception = analysisException(
+          // Rand function is not deterministic
+          s"CREATE TABLE tab (col1 DOUBLE DEFAULT rand()) USING $v2Source")
+        assert(exception.getSqlState == "42623")
+        assert(exception.errorClass.get == "INVALID_DEFAULT_VALUE.NON_DETERMINISTIC")
+        assert(exception.messageParameters("statement") == "CREATE TABLE")
+        assert(exception.messageParameters("colName") == "`col1`")
+        assert(exception.messageParameters("defaultValue") == "rand()")
+      }
+    }
+  }
+
+  test("SPARK-52116: Replace table with default value which is not deterministic") {
+    withSQLConf(SQLConf.DEFAULT_COLUMN_ALLOWED_PROVIDERS.key -> v2Source) {
+      withTable("tab") {
+        spark.sql(s"CREATE TABLE tab (col1 INT DEFAULT 100) USING $v2Source")
+        val exception = analysisException(
+          // Rand function is not deterministic
+          s"REPLACE TABLE tab (col1 DOUBLE DEFAULT rand()) USING $v2Source")
+        assert(exception.getSqlState == "42623")
+        assert(exception.errorClass.get == "INVALID_DEFAULT_VALUE.NON_DETERMINISTIC")
+        assert(exception.messageParameters("statement") == "REPLACE TABLE")
+        assert(exception.messageParameters("colName") == "`col1`")
+        assert(exception.messageParameters("defaultValue") == "rand()")
+      }
+    }
+  }
+
+  test("SPARK-52116: Add new column with default value which is not deterministic") {
     val foldableExpressions = Seq("1", "2 + 1")
     withSQLConf(SQLConf.DEFAULT_COLUMN_ALLOWED_PROVIDERS.key -> v2Source) {
       withTable("tab") {
         spark.sql(s"CREATE TABLE tab (col1 INT DEFAULT 100) USING $v2Source")
         val exception = analysisException(
-          // Rand function is not foldable
+          // Rand function is not deterministic
           s"ALTER TABLE tab ADD COLUMN col2 DOUBLE DEFAULT rand()")
-        assert(exception.getSqlState == "42K0E")
-        assert(exception.errorClass.get == "INVALID_NON_DETERMINISTIC_EXPRESSIONS")
-        assert(exception.messageParameters("sqlExprs") ==
-          "\"qualifiedcoltype(defaultvalueexpression(rand()))\"")
+        assert(exception.getSqlState == "42623")
+        assert(exception.errorClass.get == "INVALID_DEFAULT_VALUE.NON_DETERMINISTIC")
+        assert(exception.messageParameters("statement") == "ALTER TABLE ADD COLUMNS")
+        assert(exception.messageParameters("colName") == "`col2`")
+        assert(exception.messageParameters("defaultValue") == "rand()")
+      }
+      foldableExpressions.foreach(expr => {
+        withTable("tab") {
+          spark.sql(s"CREATE TABLE tab (col1 INT DEFAULT 100) USING $v2Source")
+          spark.sql(s"ALTER TABLE tab ADD COLUMN col2 DOUBLE DEFAULT $expr")
+        }
+      })
+    }
+  }
+
+  test("SPARK-52116: alter column with default value which is not deterministic") {
+    val foldableExpressions = Seq("1", "2 + 1")
+    withSQLConf(SQLConf.DEFAULT_COLUMN_ALLOWED_PROVIDERS.key -> v2Source) {
+      withTable("tab") {
+        spark.sql(s"CREATE TABLE tab (col1 DOUBLE DEFAULT 0) USING $v2Source")
+        val exception = analysisException(
+          // Rand function is not deterministic
+          s"ALTER TABLE tab ALTER COLUMN col1 SET DEFAULT rand()")
+        assert(exception.getSqlState == "42623")
+        assert(exception.errorClass.get == "INVALID_DEFAULT_VALUE.NON_DETERMINISTIC")
+        assert(exception.messageParameters("statement") == "ALTER TABLE ALTER COLUMN")
+        assert(exception.messageParameters("colName") == "`col1`")
+        assert(exception.messageParameters("defaultValue") == "rand()")
       }
       foldableExpressions.foreach(expr => {
         withTable("tab") {
@@ -3827,6 +3982,12 @@ class V2CatalogSupportBuiltinDataSource extends InMemoryCatalog {
       tracksPartitionsInCatalog = false
     )
     V1Table(sparkTable)
+  }
+
+  override def loadTable(
+      ident: Identifier,
+      writePrivileges: util.Set[TableWritePrivilege]): Table = {
+    loadTable(ident)
   }
 }
 

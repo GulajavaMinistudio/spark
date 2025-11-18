@@ -156,7 +156,7 @@ class Frame(object, metaclass=ABCMeta):
         Returns a DataFrame or Series of the same size containing the cumulative minimum.
 
         .. note:: the current implementation of cummin uses Spark's Window without
-            specifying partition specification. This leads to moveing all data into a
+            specifying partition specification. This leads to moving all data into a
             single partition in a single machine and could cause serious
             performance degradation. Avoid this method with very large datasets.
 
@@ -216,7 +216,7 @@ class Frame(object, metaclass=ABCMeta):
         Returns a DataFrame or Series of the same size containing the cumulative maximum.
 
         .. note:: the current implementation of cummax uses Spark's Window without
-            specifying partition specification. This leads to moveing all data into a
+            specifying partition specification. This leads to moving all data into a
             single partition in a single machine and could cause serious
             performance degradation. Avoid this method with very large datasets.
 
@@ -277,7 +277,7 @@ class Frame(object, metaclass=ABCMeta):
         Returns a DataFrame or Series of the same size containing the cumulative sum.
 
         .. note:: the current implementation of cumsum uses Spark's Window without
-            specifying partition specification. This leads to moveing all data into a
+            specifying partition specification. This leads to moving all data into a
             single partition in a single machine and could cause serious
             performance degradation. Avoid this method with very large datasets.
 
@@ -338,7 +338,7 @@ class Frame(object, metaclass=ABCMeta):
         Returns a DataFrame or Series of the same size containing the cumulative product.
 
         .. note:: the current implementation of cumprod uses Spark's Window without
-            specifying partition specification. This leads to moveing all data into a
+            specifying partition specification. This leads to moving all data into a
             single partition in a single machine and could cause serious
             performance degradation. Avoid this method with very large datasets.
 
@@ -3330,7 +3330,7 @@ class Frame(object, metaclass=ABCMeta):
         Synonym for `DataFrame.fillna()` or `Series.fillna()` with ``method=`bfill```.
 
         .. note:: the current implementation of 'bfill' uses Spark's Window
-            without specifying partition specification. This leads to moveing all data into a
+            without specifying partition specification. This leads to moving all data into a
             single partition in a single machine and could cause serious
             performance degradation. Avoid this method with very large datasets.
 
@@ -3370,7 +3370,7 @@ class Frame(object, metaclass=ABCMeta):
 
         Propagate non-null values backward.
 
-        >>> psdf.bfill()
+        >>> psdf.bfill().sort_index()
              A    B    C  D
         0  3.0  2.0  1.0  0
         1  3.0  4.0  1.0  1
@@ -3387,7 +3387,7 @@ class Frame(object, metaclass=ABCMeta):
         3    1.0
         dtype: float64
 
-        >>> psser.bfill()
+        >>> psser.bfill().sort_index()
         0    1.0
         1    1.0
         2    1.0
@@ -3409,7 +3409,7 @@ class Frame(object, metaclass=ABCMeta):
         Synonym for `DataFrame.fillna()` or `Series.fillna()` with ``method=`ffill```.
 
         .. note:: the current implementation of 'ffill' uses Spark's Window
-            without specifying partition specification. This leads to moveing all data into a
+            without specifying partition specification. This leads to moving all data into a
             single a partition in a single machine and could cause serious
             performance degradation. Avoid this method with very large datasets.
 
@@ -3489,7 +3489,7 @@ class Frame(object, metaclass=ABCMeta):
         Fill NaN values using an interpolation method.
 
         .. note:: the current implementation of interpolate uses Spark's Window without
-            specifying partition specification. This leads to moveing all data into a
+            specifying partition specification. This leads to moving all data into a
             single partition in a single machine and could cause serious
             performance degradation. Avoid this method with very large datasets.
 

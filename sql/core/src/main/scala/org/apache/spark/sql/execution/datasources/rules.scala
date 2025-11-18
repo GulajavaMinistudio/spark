@@ -35,7 +35,6 @@ import org.apache.spark.sql.classic.SparkSession
 import org.apache.spark.sql.connector.expressions.{FieldReference, RewritableTransform}
 import org.apache.spark.sql.errors.QueryCompilationErrors
 import org.apache.spark.sql.execution.command.DDLUtils
-import org.apache.spark.sql.execution.command.ViewHelper.generateViewProperties
 import org.apache.spark.sql.execution.datasources.{CreateTable => CreateTableV1}
 import org.apache.spark.sql.execution.datasources.v2.FileDataSourceV2
 import org.apache.spark.sql.internal.SQLConf
@@ -66,12 +65,8 @@ class ResolveSQLOnFile(sparkSession: SparkSession) extends Rule[LogicalPlan] {
                 messageParameters = e.getMessageParameters.asScala.toMap)
             case _: ClassNotFoundException => None
             case e: Exception if !e.isInstanceOf[AnalysisException] =>
-              // the provider is valid, but failed to create a logical plan
-              u.failAnalysis(
-                errorClass = "UNSUPPORTED_DATASOURCE_FOR_DIRECT_QUERY",
-                messageParameters = Map("dataSourceType" -> u.multipartIdentifier.head),
-                cause = e
-              )
+              throw QueryCompilationErrors.failedToCreatePlanForDirectQueryError(
+                u.multipartIdentifier.head, e)
           }
         case _ =>
           None
@@ -705,16 +700,6 @@ object ViewSyncSchemaToMetaStore extends (LogicalPlan => Unit) {
         }
 
         if (redo) {
-          val newProperties = if (viewSchemaMode == SchemaEvolution) {
-            generateViewProperties(
-              metaData.properties,
-              session,
-              fieldNames,
-              fieldNames,
-              metaData.viewSchemaMode)
-          } else {
-            metaData.properties
-          }
           val newSchema = if (viewSchemaMode == SchemaTypeEvolution) {
             val newFields = viewQuery.schema.map {
               case StructField(name, dataType, nullable, _) =>
@@ -727,9 +712,7 @@ object ViewSyncSchemaToMetaStore extends (LogicalPlan => Unit) {
           }
           SchemaUtils.checkColumnNameDuplication(fieldNames.toImmutableArraySeq,
             session.sessionState.conf.resolver)
-          val updatedViewMeta = metaData.copy(
-            properties = newProperties,
-            schema = newSchema)
+          val updatedViewMeta = metaData.copy(schema = newSchema)
           session.sessionState.catalog.alterTable(updatedViewMeta)
         }
       case _ => // OK

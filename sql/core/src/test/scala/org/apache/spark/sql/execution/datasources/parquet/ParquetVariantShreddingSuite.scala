@@ -19,8 +19,18 @@ package org.apache.spark.sql.execution.datasources.parquet
 
 import java.io.File
 
+import scala.jdk.CollectionConverters._
+
+import org.apache.hadoop.conf.Configuration
+import org.apache.hadoop.fs.Path
+import org.apache.parquet.hadoop.ParquetFileReader
+import org.apache.parquet.hadoop.util.HadoopInputFile
+import org.apache.parquet.schema.{LogicalTypeAnnotation, PrimitiveType, Type}
+import org.apache.parquet.schema.PrimitiveType.PrimitiveTypeName
+
 import org.apache.spark.sql.{QueryTest, Row}
 import org.apache.spark.sql.internal.SQLConf
+import org.apache.spark.sql.internal.SQLConf.ParquetOutputTimestampType
 import org.apache.spark.sql.test.SharedSparkSession
 import org.apache.spark.unsafe.types.VariantVal
 
@@ -32,6 +42,185 @@ class ParquetVariantShreddingSuite extends QueryTest with ParquetTest with Share
   private def testWithTempDir(name: String)(block: File => Unit): Unit = test(name) {
     withTempDir { dir =>
       block(dir)
+    }
+  }
+
+  test("timestamp physical type") {
+    ParquetOutputTimestampType.values.foreach { timestampParquetType =>
+      withSQLConf(SQLConf.PARQUET_OUTPUT_TIMESTAMP_TYPE.key -> timestampParquetType.toString) {
+        withTempDir { dir =>
+          val schema = "t timestamp, st struct<t timestamp>, at array<timestamp>"
+          val fullSchema = "v struct<metadata binary, value binary, typed_value struct<" +
+            "t struct<value binary, typed_value timestamp>," +
+            "st struct<" +
+            "value binary, typed_value struct<t struct<value binary, typed_value timestamp>>>," +
+            "at struct<" +
+              "value binary, typed_value array<struct<value binary, typed_value timestamp>>>" +
+            ">>, " +
+            "t1 timestamp, st1 struct<t1 timestamp>"
+          val df = spark.sql(
+            """
+              | select
+              |   to_variant_object(
+              |     named_struct('t', 1::timestamp, 'st', named_struct('t', 2::timestamp),
+              |     'at', array(5::timestamp))
+              |   ) v, 3::timestamp t1, named_struct('t1', 4::timestamp) st1
+              | from range(1)
+              |""".stripMargin)
+          withSQLConf(SQLConf.VARIANT_WRITE_SHREDDING_ENABLED.key -> true.toString,
+            SQLConf.VARIANT_ALLOW_READING_SHREDDED.key -> true.toString,
+            SQLConf.VARIANT_FORCE_SHREDDING_SCHEMA_FOR_TEST.key -> schema) {
+            df.write.mode("overwrite").parquet(dir.getAbsolutePath)
+            checkAnswer(
+              spark.read.parquet(dir.getAbsolutePath).selectExpr("to_json(v)"),
+              df.selectExpr("to_json(v)").collect()
+            )
+            val shreddedDf = spark.read.schema(fullSchema).parquet(dir.getAbsolutePath)
+            checkAnswer(
+              shreddedDf.selectExpr("v.typed_value.t.typed_value::long"),
+              Seq(Row(1)))
+            checkAnswer(
+              shreddedDf.selectExpr("v.typed_value.st.typed_value.t.typed_value::long"),
+              Seq(Row(2)))
+            checkAnswer(
+              shreddedDf.selectExpr("t1::long"),
+              Seq(Row(3)))
+            checkAnswer(
+              shreddedDf.selectExpr("st1.t1::long"),
+              Seq(Row(4)))
+            checkAnswer(
+              shreddedDf.selectExpr("v.typed_value.at.typed_value[0].typed_value::long"),
+              Seq(Row(5)))
+            val file = dir.listFiles().find(_.getName.endsWith(".parquet")).get
+            val parquetFilePath = file.getAbsolutePath
+            val inputFile = HadoopInputFile.fromPath(new Path(parquetFilePath), new Configuration())
+            val reader = ParquetFileReader.open(inputFile)
+            val footer = reader.getFooter
+            val schema = footer.getFileMetaData.getSchema
+            // v.typed_value.t.typed_value
+            val vGroup = schema.getType(schema.getFieldIndex("v")).asGroupType()
+            val typedValueGroup = vGroup.getType("typed_value").asGroupType()
+            val tGroup = typedValueGroup.getType("t").asGroupType()
+            val typedValue1 = tGroup.getType("typed_value").asPrimitiveType()
+            assert(typedValue1.getPrimitiveTypeName == PrimitiveTypeName.INT64)
+            assert(typedValue1.getLogicalTypeAnnotation == LogicalTypeAnnotation.timestampType(
+              true, LogicalTypeAnnotation.TimeUnit.MICROS))
+
+            // v.typed_value.st.typed_value.t.typed_value
+            val stGroup = typedValueGroup.getType("st").asGroupType()
+            val stTypedValueGroup = stGroup.getType("typed_value").asGroupType()
+            val stTGroup = stTypedValueGroup.getType("t").asGroupType()
+            val typedValue2 = stTGroup.getType("typed_value").asPrimitiveType()
+            assert(typedValue2.getPrimitiveTypeName == PrimitiveTypeName.INT64)
+            assert(typedValue2.getLogicalTypeAnnotation == LogicalTypeAnnotation.timestampType(
+              true, LogicalTypeAnnotation.TimeUnit.MICROS))
+
+            // v.typed_value.at.typed_value[0].typed_value
+            val atGroup = typedValueGroup.getType("at").asGroupType()
+            val atTypedValueGroup = atGroup.getType("typed_value").asGroupType()
+            val atLGroup = atTypedValueGroup.getType("list").asGroupType()
+            val atLEGroup = atLGroup.getType("element").asGroupType()
+            val typedValue3 = atLEGroup.getType("typed_value").asPrimitiveType()
+            assert(typedValue3.getPrimitiveTypeName == PrimitiveTypeName.INT64)
+            assert(typedValue3.getLogicalTypeAnnotation == LogicalTypeAnnotation.timestampType(
+              true, LogicalTypeAnnotation.TimeUnit.MICROS))
+
+            def verifyNonVariantTimestampType(t: PrimitiveType): Unit = {
+              timestampParquetType match {
+                case ParquetOutputTimestampType.INT96 =>
+                  assert(t.getPrimitiveTypeName == PrimitiveTypeName.INT96)
+                  assert(t.getLogicalTypeAnnotation == null)
+                case ParquetOutputTimestampType.TIMESTAMP_MICROS =>
+                  assert(t.getPrimitiveTypeName == PrimitiveTypeName.INT64)
+                  assert(t.getLogicalTypeAnnotation == LogicalTypeAnnotation.timestampType(
+                    true, LogicalTypeAnnotation.TimeUnit.MICROS))
+                case ParquetOutputTimestampType.TIMESTAMP_MILLIS =>
+                  assert(t.getPrimitiveTypeName == PrimitiveTypeName.INT64)
+                  assert(t.getLogicalTypeAnnotation == LogicalTypeAnnotation.timestampType(
+                    true, LogicalTypeAnnotation.TimeUnit.MILLIS))
+              }
+            }
+
+            // t1
+            val t1Value = schema.getType(schema.getFieldIndex("t1")).asPrimitiveType()
+            verifyNonVariantTimestampType(t1Value)
+
+            // st1.t1
+            val st1Group = schema.getType(schema.getFieldIndex("st1")).asGroupType()
+            val st1T1Value = st1Group.getType("t1").asPrimitiveType()
+            verifyNonVariantTimestampType(st1T1Value)
+            reader.close()
+          }
+        }
+      }
+    }
+  }
+
+  test("variant logical type annotation") {
+    Seq(false, true).foreach { annotateVariantLogicalType =>
+      Seq(false, true).foreach { shredVariant =>
+        Seq(false, true).foreach { allowReadingShredded =>
+          withSQLConf(SQLConf.VARIANT_WRITE_SHREDDING_ENABLED.key -> shredVariant.toString,
+            SQLConf.VARIANT_INFER_SHREDDING_SCHEMA.key -> shredVariant.toString,
+            SQLConf.VARIANT_ALLOW_READING_SHREDDED.key ->
+              (allowReadingShredded || shredVariant).toString,
+            SQLConf.PARQUET_ANNOTATE_VARIANT_LOGICAL_TYPE.key ->
+              annotateVariantLogicalType.toString) {
+            def validateAnnotation(g: Type): Unit = {
+              if (annotateVariantLogicalType) {
+                assert(g.getLogicalTypeAnnotation == LogicalTypeAnnotation.variantType(1))
+              } else {
+                assert(g.getLogicalTypeAnnotation == null)
+              }
+            }
+            withTempDir { dir =>
+              // write parquet file
+              val df = spark.sql(
+                """
+                  | select
+                  |  id * 2 i,
+                  |  to_variant_object(named_struct('id', id)) v,
+                  |  named_struct('i', (id * 2)::string,
+                  |     'nv', to_variant_object(named_struct('id', 30 + id))) ns,
+                  |  array(to_variant_object(named_struct('id', 10 + id))) av,
+                  |  map('v2', to_variant_object(named_struct('id', 20 + id))) mv
+                  |  from range(0,3,1,1)""".stripMargin)
+              df.write.mode("overwrite").parquet(dir.getAbsolutePath)
+              val file = dir.listFiles().find(_.getName.endsWith(".parquet")).get
+              val parquetFilePath = file.getAbsolutePath
+              val inputFile = HadoopInputFile.fromPath(new Path(parquetFilePath),
+                new Configuration())
+              val reader = ParquetFileReader.open(inputFile)
+              val footer = reader.getFooter
+              val schema = footer.getFileMetaData.getSchema
+              val vGroup = schema.getType(schema.getFieldIndex("v"))
+              validateAnnotation(vGroup)
+              assert(vGroup.asGroupType().getFields.asScala.toSeq
+                .exists(_.getName == "typed_value") == shredVariant)
+              val nsGroup = schema.getType(schema.getFieldIndex("ns")).asGroupType()
+              val nvGroup = nsGroup.getType(nsGroup.getFieldIndex("nv"))
+              validateAnnotation(nvGroup)
+              val avGroup = schema.getType(schema.getFieldIndex("av")).asGroupType()
+              val avList = avGroup.getType(avGroup.getFieldIndex("list")).asGroupType()
+              val avElement = avList.getType(avList.getFieldIndex("element"))
+              validateAnnotation(avElement)
+              val mvGroup = schema.getType(schema.getFieldIndex("mv")).asGroupType()
+              val mvList = mvGroup.getType(mvGroup.getFieldIndex("key_value")).asGroupType()
+              val mvValue = mvList.getType(mvList.getFieldIndex("value"))
+              validateAnnotation(mvValue)
+              // verify result
+              val result = spark.read.format("parquet")
+                .schema("v variant, ns struct<nv variant>, av array<variant>, " +
+                  "mv map<string, variant>")
+                .load(dir.getAbsolutePath)
+                .selectExpr("v:id::int i1", "ns.nv:id::int i2", "av[0]:id::int i3",
+                  "mv['v2']:id::int i4")
+              checkAnswer(result, Array(Row(0, 30, 10, 20), Row(1, 31, 11, 21), Row(2, 32, 12, 22)))
+              reader.close()
+            }
+          }
+        }
+      }
     }
   }
 

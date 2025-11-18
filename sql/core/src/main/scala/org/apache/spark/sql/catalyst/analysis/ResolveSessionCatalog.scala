@@ -17,11 +17,8 @@
 
 package org.apache.spark.sql.catalyst.analysis
 
-import org.apache.commons.lang3.StringUtils
-
 import org.apache.spark.SparkException
 import org.apache.spark.internal.LogKeys.CONFIG
-import org.apache.spark.internal.MDC
 import org.apache.spark.sql.SaveMode
 import org.apache.spark.sql.catalyst.{FunctionIdentifier, TableIdentifier}
 import org.apache.spark.sql.catalyst.catalog.{CatalogStorageFormat, CatalogTable, CatalogTableType, CatalogUtils, ClusterBySpec}
@@ -40,6 +37,7 @@ import org.apache.spark.sql.internal.{HiveSerDe, SQLConf}
 import org.apache.spark.sql.internal.connector.V1Function
 import org.apache.spark.sql.types.{MetadataBuilder, StringType, StructField, StructType}
 import org.apache.spark.util.ArrayImplicits._
+import org.apache.spark.util.SparkStringUtils
 
 /**
  * Converts resolved v2 commands to v1 if the catalog is the session catalog. Since the v2 commands
@@ -105,7 +103,12 @@ class ResolveSessionCatalog(val catalogManager: CatalogManager)
           }
       }
       // Add the current default column value string (if any) to the column metadata.
-      s.newDefaultExpression.map { c => builder.putString(CURRENT_DEFAULT_COLUMN_METADATA_KEY, c) }
+      s.newDefaultExpression.map { c => builder.putString(CURRENT_DEFAULT_COLUMN_METADATA_KEY,
+        c.originalSQL) }
+      if (s.dropDefault) {
+        // for legacy reasons, "" means clearing default value
+        builder.putString(CURRENT_DEFAULT_COLUMN_METADATA_KEY, "")
+      }
       val newColumn = StructField(
         colName,
         dataType,
@@ -144,7 +147,7 @@ class ResolveSessionCatalog(val catalogManager: CatalogManager)
       AlterDatabasePropertiesCommand(db, properties)
 
     case SetNamespaceLocation(ResolvedV1Database(db), location) if conf.useV1Command =>
-      if (StringUtils.isEmpty(location)) {
+      if (SparkStringUtils.isEmpty(location)) {
         throw QueryExecutionErrors.invalidEmptyLocationError(location)
       }
       AlterDatabaseSetLocationCommand(db, location)
@@ -436,13 +439,13 @@ class ResolveSessionCatalog(val catalogManager: CatalogManager)
         viewSchemaMode = viewSchemaMode)
 
     case CreateView(ResolvedIdentifier(catalog, _), _, _, _, _, _, _, _, _, _) =>
-      throw QueryCompilationErrors.missingCatalogAbilityError(catalog, "views")
+      throw QueryCompilationErrors.missingCatalogViewsAbilityError(catalog)
 
     case ShowViews(ns: ResolvedNamespace, pattern, output) =>
       ns match {
         case ResolvedDatabaseInSessionCatalog(db) => ShowViewsCommand(db, pattern, output)
         case _ =>
-          throw QueryCompilationErrors.missingCatalogAbilityError(ns.catalog, "views")
+          throw QueryCompilationErrors.missingCatalogViewsAbilityError(ns.catalog)
       }
 
     // If target is view, force use v1 command
@@ -460,7 +463,7 @@ class ResolveSessionCatalog(val catalogManager: CatalogManager)
       if (isSessionCatalog(catalog)) {
         DescribeFunctionCommand(func.asInstanceOf[V1Function].info, extended)
       } else {
-        throw QueryCompilationErrors.missingCatalogAbilityError(catalog, "functions")
+        throw QueryCompilationErrors.missingCatalogFunctionsAbilityError(catalog)
       }
 
     case ShowFunctions(
@@ -473,7 +476,7 @@ class ResolveSessionCatalog(val catalogManager: CatalogManager)
           identifier.asFunctionIdentifier)
         DropFunctionCommand(funcIdentifier, ifExists, false)
       } else {
-        throw QueryCompilationErrors.missingCatalogAbilityError(catalog, "DROP FUNCTION")
+        throw QueryCompilationErrors.missingCatalogDropFunctionAbilityError(catalog)
       }
 
     case RefreshFunction(ResolvedPersistentFunc(catalog, identifier, _)) =>
@@ -482,7 +485,7 @@ class ResolveSessionCatalog(val catalogManager: CatalogManager)
           identifier.asFunctionIdentifier)
         RefreshFunctionCommand(funcIdentifier.database, funcIdentifier.funcName)
       } else {
-        throw QueryCompilationErrors.missingCatalogAbilityError(catalog, "REFRESH FUNCTION")
+        throw QueryCompilationErrors.missingCatalogRefreshFunctionAbilityError(catalog)
       }
 
     case CreateFunction(
@@ -496,7 +499,7 @@ class ResolveSessionCatalog(val catalogManager: CatalogManager)
         replace)
 
     case CreateFunction(ResolvedIdentifier(catalog, _), _, _, _, _) =>
-      throw QueryCompilationErrors.missingCatalogAbilityError(catalog, "CREATE FUNCTION")
+      throw QueryCompilationErrors.missingCatalogCreateFunctionAbilityError(catalog)
 
     case c @ CreateUserDefinedFunction(
         ResolvedIdentifierInSessionCatalog(ident), _, _, _, _, _, _, _, _, _, _, _) =>
@@ -517,7 +520,7 @@ class ResolveSessionCatalog(val catalogManager: CatalogManager)
 
     case CreateUserDefinedFunction(
         ResolvedIdentifier(catalog, _), _, _, _, _, _, _, _, _, _, _, _) =>
-      throw QueryCompilationErrors.missingCatalogAbilityError(catalog, "CREATE FUNCTION")
+      throw QueryCompilationErrors.missingCatalogCreateFunctionAbilityError(catalog)
   }
 
   private def constructV1TableCmd(

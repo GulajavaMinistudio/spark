@@ -19,7 +19,7 @@ package org.apache.spark.sql.catalyst.analysis
 
 import java.util.Locale
 
-import org.apache.spark.internal.{Logging, MDC}
+import org.apache.spark.internal.Logging
 import org.apache.spark.internal.LogKeys.{ANALYSIS_ERROR, QUERY_PLAN}
 import org.apache.spark.sql.AnalysisException
 import org.apache.spark.sql.catalyst.ExtendedAnalysisException
@@ -40,7 +40,8 @@ object UnsupportedOperationChecker extends Logging {
   def checkForBatch(plan: LogicalPlan): Unit = {
     plan.foreachUp {
       case p if p.isStreaming =>
-        throwError("Queries with streaming sources must be executed with writeStream.start()")(p)
+        throwError("Queries with streaming sources must be executed with writeStream.start(), or " +
+          "from a streaming table or flow definition within a Spark Declarative Pipeline.")(p)
 
       case d: DeduplicateWithinWatermark =>
         throwError("dropDuplicatesWithinWatermark is not supported with batch " +
@@ -581,6 +582,25 @@ object UnsupportedOperationChecker extends Logging {
         }
       }
     }
+  }
+
+  // Verifies that a query using real-time mode is valid. It is meant to be used in addition to
+  // the checkForStreaming method: for this reason, we call this method check *additional*
+  // real-time mode constraints.
+  //
+  // It should be called during resolution of the WriteToStreamStatement if and only if
+  // the query is using the real-time trigger.
+  def checkAdditionalRealTimeModeConstraints(plan: LogicalPlan, outputMode: OutputMode): Unit = {
+    if (outputMode != InternalOutputModes.Update) {
+      throwRealTimeError("OUTPUT_MODE_NOT_SUPPORTED", Map("outputMode" -> outputMode.toString))
+    }
+  }
+
+  private def throwRealTimeError(subClass: String, args: Map[String, String]): Unit = {
+    throw new AnalysisException(
+      errorClass = s"STREAMING_REAL_TIME_MODE.$subClass",
+      messageParameters = args
+    )
   }
 
   private def throwErrorIf(

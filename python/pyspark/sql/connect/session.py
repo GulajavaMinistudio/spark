@@ -23,12 +23,13 @@ import json
 import threading
 import os
 import warnings
-from collections.abc import Sized
+from collections.abc import Callable, Sized
 import functools
 from threading import RLock
 from typing import (
     Optional,
     Any,
+    Iterator,
     Union,
     Dict,
     List,
@@ -61,7 +62,7 @@ from pyspark.sql.connect.plan import (
     Range,
     LocalRelation,
     LogicalPlan,
-    CachedLocalRelation,
+    ChunkedCachedLocalRelation,
     CachedRelation,
     CachedRemoteRelation,
     SubqueryAlias,
@@ -106,6 +107,7 @@ from pyspark.errors import (
 )
 
 if TYPE_CHECKING:
+    import pyspark.sql.connect.proto as pb2
     from pyspark.sql.connect._typing import OptionalPrimitiveType
     from pyspark.sql.connect.catalog import Catalog
     from pyspark.sql.connect.udf import UDFRegistration
@@ -130,6 +132,7 @@ class SparkSession:
         def __init__(self) -> None:
             self._options: Dict[str, Any] = {}
             self._channel_builder: Optional[DefaultChannelBuilder] = None
+            self._hook_factories: list["Callable[[SparkSession], SparkSession.Hook]"] = []
 
         @overload
         def config(self, key: str, value: Any) -> "SparkSession.Builder":
@@ -191,6 +194,13 @@ class SparkSession:
                 self._channel_builder = channelBuilder
                 return self
 
+        def _registerHook(
+            self, hook_factory: "Callable[[SparkSession], SparkSession.Hook]"
+        ) -> "SparkSession.Builder":
+            with self._lock:
+                self._hook_factories.append(hook_factory)
+                return self
+
         def enableHiveSupport(self) -> "SparkSession.Builder":
             raise PySparkNotImplementedError(
                 errorClass="NOT_IMPLEMENTED", messageParameters={"feature": "enableHiveSupport"}
@@ -235,11 +245,13 @@ class SparkSession:
 
             if has_channel_builder:
                 assert self._channel_builder is not None
-                session = SparkSession(connection=self._channel_builder)
+                session = SparkSession(
+                    connection=self._channel_builder, hook_factories=self._hook_factories
+                )
             else:
                 spark_remote = to_str(self._options.get("spark.remote"))
                 assert spark_remote is not None
-                session = SparkSession(connection=spark_remote)
+                session = SparkSession(connection=spark_remote, hook_factories=self._hook_factories)
 
             SparkSession._set_default_and_active_session(session)
             self._apply_options(session)
@@ -255,6 +267,16 @@ class SparkSession:
                 self._apply_options(session)
                 return session
 
+    class Hook:
+        """A Hook can be used to inject behavior into the session."""
+
+        def on_execute_plan(self, request: "pb2.ExecutePlanRequest") -> "pb2.ExecutePlanRequest":
+            """Called before sending an ExecutePlanRequest.
+
+            The request is replaced with the one returned by this method.
+            """
+            return request
+
     _client: SparkConnectClient
 
     # SPARK-47544: Explicitly declaring this as an identifier instead of a method.
@@ -262,7 +284,12 @@ class SparkSession:
     builder: Builder = classproperty(lambda cls: cls.Builder())  # type: ignore
     builder.__doc__ = PySparkSession.builder.__doc__
 
-    def __init__(self, connection: Union[str, DefaultChannelBuilder], userId: Optional[str] = None):
+    def __init__(
+        self,
+        connection: Union[str, DefaultChannelBuilder],
+        userId: Optional[str] = None,
+        hook_factories: Optional[list["Callable[[SparkSession], Hook]"]] = None,
+    ) -> None:
         """
         Creates a new SparkSession for the Spark Connect interface.
 
@@ -277,8 +304,15 @@ class SparkSession:
             isolate their Spark Sessions. If the `user_id` is not set, will default to
             the $USER environment. Defining the user ID as part of the connection string
             takes precedence.
+        hook_factories: list[Callable[[SparkSession], Hook]], optional
+            Optional list of hook factories for hooks that should be registered for this session.
         """
-        self._client = SparkConnectClient(connection=connection, user_id=userId)
+        hook_factories = hook_factories or []
+        self._client = SparkConnectClient(
+            connection=connection,
+            user_id=userId,
+            session_hooks=[factory(self) for factory in hook_factories],
+        )
         self._session_id = self._client._session_id
 
         # Set to false to prevent client.release_session on close() (testing only)
@@ -502,6 +536,9 @@ class SparkSession:
             "spark.sql.timestampType",
             "spark.sql.session.timeZone",
             "spark.sql.session.localRelationCacheThreshold",
+            "spark.sql.session.localRelationChunkSizeRows",
+            "spark.sql.session.localRelationChunkSizeBytes",
+            "spark.sql.session.localRelationBatchOfChunksSizeBytes",
             "spark.sql.execution.pandas.convertToArrowArraySafely",
             "spark.sql.execution.pandas.inferPandasDictAsMap",
             "spark.sql.pyspark.inferNestedDictAsStruct.enabled",
@@ -524,6 +561,11 @@ class SparkSession:
             # If no schema supplied by user then get the names of columns only
             if schema is None:
                 _cols = [str(x) if not isinstance(x, str) else x for x in data.columns]
+                if len(_cols) == 0:
+                    raise PySparkValueError(
+                        errorClass="CANNOT_INFER_EMPTY_SCHEMA",
+                        messageParameters={},
+                    )
                 infer_pandas_dict_as_map = (
                     configs["spark.sql.execution.pandas.inferPandasDictAsMap"] == "true"
                 )
@@ -586,7 +628,7 @@ class SparkSession:
 
             safecheck = configs["spark.sql.execution.pandas.convertToArrowArraySafely"]
 
-            ser = ArrowStreamPandasSerializer(cast(str, timezone), safecheck == "true")
+            ser = ArrowStreamPandasSerializer(cast(str, timezone), safecheck == "true", False)
 
             _table = pa.Table.from_batches(
                 [
@@ -722,10 +764,27 @@ class SparkSession:
         else:
             local_relation = LocalRelation(_table)
 
-        cache_threshold = configs["spark.sql.session.localRelationCacheThreshold"]
+        # get_config_dict throws [SQL_CONF_NOT_FOUND] if the key is not found.
+        cache_threshold = int(
+            configs["spark.sql.session.localRelationCacheThreshold"]  # type: ignore[arg-type]
+        )
+        max_chunk_size_rows = int(
+            configs["spark.sql.session.localRelationChunkSizeRows"]  # type: ignore[arg-type]
+        )
+        max_chunk_size_bytes = int(
+            configs["spark.sql.session.localRelationChunkSizeBytes"]  # type: ignore[arg-type]
+        )
+        max_batch_of_chunks_size_bytes = int(
+            configs["spark.sql.session.localRelationBatchOfChunksSizeBytes"]  # type: ignore[arg-type] # noqa: E501
+        )
         plan: LogicalPlan = local_relation
-        if cache_threshold is not None and int(cache_threshold) <= _table.nbytes:
-            plan = CachedLocalRelation(self._cache_local_relation(local_relation))
+        if cache_threshold <= _table.nbytes:
+            plan = self._cache_local_relation(
+                local_relation,
+                max_chunk_size_rows,
+                max_chunk_size_bytes,
+                max_batch_of_chunks_size_bytes,
+            )
 
         df = DataFrame(plan, self)
         if _cols is not None and len(_cols) > 0:
@@ -998,12 +1057,68 @@ class SparkSession:
 
     addArtifact = addArtifacts
 
-    def _cache_local_relation(self, local_relation: LocalRelation) -> str:
+    def _cache_local_relation(
+        self,
+        local_relation: LocalRelation,
+        max_chunk_size_rows: int,
+        max_chunk_size_bytes: int,
+        max_batch_of_chunks_size_bytes: int,
+    ) -> ChunkedCachedLocalRelation:
         """
         Cache the local relation at the server side if it has not been cached yet.
+
+        This method serializes the input local relation into multiple data chunks and
+        a schema chunk (if the schema is available) and uploads these chunks as artifacts
+        to the server.
+
+        The method collects a batch of chunks of size up to max_batch_of_chunks_size_bytes and
+        uploads them together to the server.
+        Uploading each chunk separately would require an additional RPC call for each chunk.
+        Uploading all chunks together would require materializing all chunks in memory which
+        may cause high memory usage on the client.
+        Uploading batches of chunks is the middle-ground solution.
+
+        Should only be called on a LocalRelation with a non-empty _table.
         """
-        serialized = local_relation.serialize(self._client)
-        return self._client.cache_artifact(serialized)
+        assert local_relation._table is not None, "table cannot be None"
+        has_schema = local_relation._schema is not None
+
+        hashes = []
+        current_batch = []
+        current_batch_size = 0
+        if has_schema:
+            schema_chunk = local_relation._serialize_schema()
+            current_batch.append(schema_chunk)
+            current_batch_size += len(schema_chunk)
+
+        data_chunks: Iterator[bytes] = local_relation._serialize_table_chunks(
+            max_chunk_size_rows, min(max_chunk_size_bytes, max_batch_of_chunks_size_bytes)
+        )
+
+        for chunk in data_chunks:
+            chunk_size = len(chunk)
+
+            # Check if adding this chunk would exceed batch size
+            if (
+                len(current_batch) > 0
+                and current_batch_size + chunk_size > max_batch_of_chunks_size_bytes
+            ):
+                hashes += self._client.cache_artifacts(current_batch)
+                # start a new batch
+                current_batch = []
+                current_batch_size = 0
+
+            current_batch.append(chunk)
+            current_batch_size += chunk_size
+        hashes += self._client.cache_artifacts(current_batch)
+
+        if has_schema:
+            schema_hash = hashes[0]
+            data_hashes = hashes[1:]
+        else:
+            schema_hash = None
+            data_hashes = hashes
+        return ChunkedCachedLocalRelation(data_hashes, schema_hash)
 
     def copyFromLocalToFs(self, local_path: str, dest_path: str) -> None:
         if urllib.parse.urlparse(dest_path).scheme:
@@ -1141,6 +1256,40 @@ class SparkSession:
         dt = self._client._analyze(method="ddl_parse", ddl_string=ddl).parsed
         assert dt is not None
         return dt
+
+    def cloneSession(self, new_session_id: Optional[str] = None) -> "SparkSession":
+        """
+        Create a clone of this Spark Connect session on the server side. The server-side session
+        is cloned with all its current state (SQL configurations, temporary views, registered
+        functions, catalog state) copied over to a new independent session. The returned cloned
+        session is isolated from this session - any subsequent changes to either session's
+        server-side state will not be reflected in the other.
+
+        Parameters
+        ----------
+        new_session_id : str, optional
+            Custom session ID to use for the cloned session (must be a valid UUID).
+            If not provided, a new UUID will be generated.
+
+        Returns
+        -------
+        SparkSession
+            A new SparkSession instance with the cloned session.
+
+        Notes
+        -----
+        This creates a new server-side session with the specified or generated session ID
+        while preserving the current session's configuration and state.
+
+        .. note::
+            This is a developer API.
+        """
+        cloned_client = self._client.clone(new_session_id)
+        # Create a new SparkSession with the cloned client directly
+        new_session = object.__new__(SparkSession)
+        new_session._client = cloned_client
+        new_session._session_id = cloned_client._session_id
+        return new_session
 
 
 SparkSession.__doc__ = PySparkSession.__doc__

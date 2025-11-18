@@ -23,13 +23,13 @@ import scala.collection.mutable
 import scala.collection.mutable.ListBuffer
 
 import org.apache.spark.SparkException
-import org.apache.spark.sql.catalyst.catalog.VariableDefinition
+import org.apache.spark.sql.catalyst.catalog.{SqlScriptingExecutionContextExtension, VariableDefinition}
 import org.apache.spark.sql.scripting.SqlScriptingFrameType.SqlScriptingFrameType
 
 /**
  * SQL scripting execution context - keeps track of the current execution state.
  */
-class SqlScriptingExecutionContext {
+class SqlScriptingExecutionContext extends SqlScriptingExecutionContextExtension {
   // List of frames that are currently active.
   private[scripting] val frames: ListBuffer[SqlScriptingExecutionFrame] = ListBuffer.empty
   private[scripting] var firstHandlerScopeLabel: Option[String] = None
@@ -59,7 +59,8 @@ class SqlScriptingExecutionContext {
     }
 
     // If the last frame is a handler, try to find a handler in its body first.
-    if (frames.last.frameType == SqlScriptingFrameType.HANDLER) {
+    if (frames.last.frameType == SqlScriptingFrameType.EXIT_HANDLER
+        || frames.last.frameType == SqlScriptingFrameType.CONTINUE_HANDLER) {
       val handler = frames.last.findHandler(condition, sqlState, firstHandlerScopeLabel)
       if (handler.isDefined) {
         return handler
@@ -83,7 +84,7 @@ class SqlScriptingExecutionContext {
 
 object SqlScriptingFrameType extends Enumeration {
   type SqlScriptingFrameType = Value
-  val SQL_SCRIPT, HANDLER = Value
+  val SQL_SCRIPT, EXIT_HANDLER, CONTINUE_HANDLER = Value
 }
 
 /**
@@ -93,7 +94,8 @@ object SqlScriptingFrameType extends Enumeration {
  * @param executionPlan CompoundBody which need to be executed.
  * @param frameType Type of the frame.
  * @param scopeLabel Label of the scope where handler is defined.
- *                   Available only for frameType = HANDLER.
+ *                   Available only for frameType = EXIT_HANDLER, frameType = CONTINUE_HANDLER
+ *                   and frameType = SQL_STORED_PROCEDURE.
  */
 class SqlScriptingExecutionFrame(
     val executionPlan: CompoundBodyExec,
@@ -141,7 +143,9 @@ class SqlScriptingExecutionFrame(
       sqlState: String,
       firstHandlerScopeLabel: Option[String]): Option[ExceptionHandlerExec] = {
 
-    val searchScopes = if (frameType == SqlScriptingFrameType.HANDLER) {
+    val searchScopes =
+      if (frameType == SqlScriptingFrameType.EXIT_HANDLER
+          || frameType == SqlScriptingFrameType.CONTINUE_HANDLER) {
       // If the frame is a handler, search for the handler in its body. Don't skip any scopes.
       scopes.reverseIterator
     } else if (firstHandlerScopeLabel.isEmpty) {
@@ -204,6 +208,15 @@ class SqlScriptingExecutionScope(
     val uppercaseSqlState = sqlState.toUpperCase(Locale.ROOT)
 
     errorHandler = triggerToExceptionHandlerMap.getHandlerForCondition(uppercaseCondition)
+
+    if (errorHandler.isEmpty) {
+      if (uppercaseCondition.contains('.')) {
+        // If the condition contains a dot, it has a main error class and a subclass.
+        // Check if the error class is defined in the triggerToExceptionHandlerMap.
+        val errorClass = uppercaseCondition.split('.').head
+        errorHandler = triggerToExceptionHandlerMap.getHandlerForCondition(errorClass)
+      }
+    }
 
     if (errorHandler.isEmpty) {
       // Check if there is a specific handler for the given SQLSTATE.

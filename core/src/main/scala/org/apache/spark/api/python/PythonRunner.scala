@@ -32,7 +32,7 @@ import scala.util.control.NonFatal
 
 import org.apache.spark._
 import org.apache.spark.api.python.PythonFunction.PythonAccumulator
-import org.apache.spark.internal.{Logging, LogKeys, MDC, MessageWithContext}
+import org.apache.spark.internal.{Logging, LogKeys, MessageWithContext}
 import org.apache.spark.internal.LogKeys.TASK_NAME
 import org.apache.spark.internal.config.{BUFFER_SIZE, EXECUTOR_CORES}
 import org.apache.spark.internal.config.Python._
@@ -66,9 +66,18 @@ private[spark] object PythonEvalType {
   val SQL_TRANSFORM_WITH_STATE_PANDAS_INIT_STATE_UDF = 212
   val SQL_TRANSFORM_WITH_STATE_PYTHON_ROW_UDF = 213
   val SQL_TRANSFORM_WITH_STATE_PYTHON_ROW_INIT_STATE_UDF = 214
+  val SQL_GROUPED_MAP_ARROW_ITER_UDF = 215
+  val SQL_GROUPED_MAP_PANDAS_ITER_UDF = 216
+
+  // Arrow UDFs
+  val SQL_SCALAR_ARROW_UDF = 250
+  val SQL_SCALAR_ARROW_ITER_UDF = 251
+  val SQL_GROUPED_AGG_ARROW_UDF = 252
+  val SQL_WINDOW_AGG_ARROW_UDF = 253
 
   val SQL_TABLE_UDF = 300
   val SQL_ARROW_TABLE_UDF = 301
+  val SQL_ARROW_UDTF = 302
 
   def toString(pythonEvalType: Int): String = pythonEvalType match {
     case NON_UDF => "NON_UDF"
@@ -87,12 +96,21 @@ private[spark] object PythonEvalType {
     case SQL_COGROUPED_MAP_ARROW_UDF => "SQL_COGROUPED_MAP_ARROW_UDF"
     case SQL_TABLE_UDF => "SQL_TABLE_UDF"
     case SQL_ARROW_TABLE_UDF => "SQL_ARROW_TABLE_UDF"
+    case SQL_ARROW_UDTF => "SQL_ARROW_UDTF"
     case SQL_TRANSFORM_WITH_STATE_PANDAS_UDF => "SQL_TRANSFORM_WITH_STATE_PANDAS_UDF"
     case SQL_TRANSFORM_WITH_STATE_PANDAS_INIT_STATE_UDF =>
       "SQL_TRANSFORM_WITH_STATE_PANDAS_INIT_STATE_UDF"
     case SQL_TRANSFORM_WITH_STATE_PYTHON_ROW_UDF => "SQL_TRANSFORM_WITH_STATE_PYTHON_ROW_UDF"
     case SQL_TRANSFORM_WITH_STATE_PYTHON_ROW_INIT_STATE_UDF =>
       "SQL_TRANSFORM_WITH_STATE_PYTHON_ROW_INIT_STATE_UDF"
+    case SQL_GROUPED_MAP_ARROW_ITER_UDF => "SQL_GROUPED_MAP_ARROW_ITER_UDF"
+    case SQL_GROUPED_MAP_PANDAS_ITER_UDF => "SQL_GROUPED_MAP_PANDAS_ITER_UDF"
+
+    // Arrow UDFs
+    case SQL_SCALAR_ARROW_UDF => "SQL_SCALAR_ARROW_UDF"
+    case SQL_SCALAR_ARROW_ITER_UDF => "SQL_SCALAR_ARROW_ITER_UDF"
+    case SQL_GROUPED_AGG_ARROW_UDF => "SQL_GROUPED_AGG_ARROW_UDF"
+    case SQL_WINDOW_AGG_ARROW_UDF => "SQL_WINDOW_AGG_ARROW_UDF"
   }
 }
 
@@ -102,6 +120,18 @@ private[spark] object BasePythonRunner extends Logging {
 
   private[spark] def faultHandlerLogPath(pid: Int): Path = {
     new File(faultHandlerLogDir, pid.toString).toPath
+  }
+
+  private[spark] def tryReadFaultHandlerLog(
+      faultHandlerEnabled: Boolean, pid: Option[Int]): Option[String] = {
+    if (faultHandlerEnabled) {
+      pid.map(faultHandlerLogPath).collect {
+        case path if JavaFiles.exists(path) =>
+          val error = String.join("\n", JavaFiles.readAllLines(path)) + "\n"
+          JavaFiles.deleteIfExists(path)
+          error
+      }
+    } else None
   }
 
   private[spark] def pythonWorkerStatusMessageWithContext(
@@ -158,10 +188,15 @@ private[spark] abstract class BasePythonRunner[IN, OUT](
   protected val timelyFlushEnabled: Boolean = false
   protected val timelyFlushTimeoutNanos: Long = 0
   protected val authSocketTimeout = conf.get(PYTHON_AUTH_SOCKET_TIMEOUT)
+  private val useDaemon = conf.get(PYTHON_USE_DAEMON)
   private val reuseWorker = conf.get(PYTHON_WORKER_REUSE)
   protected val faultHandlerEnabled: Boolean = conf.get(PYTHON_WORKER_FAULTHANLDER_ENABLED)
   protected val idleTimeoutSeconds: Long = conf.get(PYTHON_WORKER_IDLE_TIMEOUT_SECONDS)
   protected val killOnIdleTimeout: Boolean = conf.get(PYTHON_WORKER_KILL_ON_IDLE_TIMEOUT)
+  protected val tracebackDumpIntervalSeconds: Long =
+    conf.get(PYTHON_WORKER_TRACEBACK_DUMP_INTERVAL_SECONDS)
+  protected val killWorkerOnFlushFailure: Boolean =
+     conf.get(PYTHON_DAEMON_KILL_WORKER_ON_FLUSH_FAILURE)
   protected val hideTraceback: Boolean = false
   protected val simplifiedTraceback: Boolean = false
 
@@ -259,13 +294,19 @@ private[spark] abstract class BasePythonRunner[IN, OUT](
     if (faultHandlerEnabled) {
       envVars.put("PYTHON_FAULTHANDLER_DIR", faultHandlerLogDir.toString)
     }
+    if (tracebackDumpIntervalSeconds > 0L) {
+      envVars.put("PYTHON_TRACEBACK_DUMP_INTERVAL_SECONDS", tracebackDumpIntervalSeconds.toString)
+    }
+    if (useDaemon && killWorkerOnFlushFailure) {
+      envVars.put("PYTHON_DAEMON_KILL_WORKER_ON_FLUSH_FAILURE", "1")
+    }
     // allow the user to set the batch size for the BatchedSerializer on UDFs
     envVars.put("PYTHON_UDF_BATCH_SIZE", batchSizeForPythonUDF.toString)
 
     envVars.put("SPARK_JOB_ARTIFACT_UUID", jobArtifactUUID.getOrElse("default"))
 
     val (worker: PythonWorker, handle: Option[ProcessHandle]) = env.createPythonWorker(
-      pythonExec, workerModule, daemonModule, envVars.asScala.toMap)
+      pythonExec, workerModule, daemonModule, envVars.asScala.toMap, useDaemon)
     // Whether is the worker released into idle pool or closed. When any codes try to release or
     // close a worker, they should use `releasedOrClosed.compareAndSet` to flip the state to make
     // sure there is only one winner that is going to release or close the worker.
@@ -298,7 +339,8 @@ private[spark] abstract class BasePythonRunner[IN, OUT](
 
     // Return an iterator that read lines from the process's stdout
     val dataIn = new DataInputStream(new BufferedInputStream(
-      new ReaderInputStream(worker, writer, handle, idleTimeoutSeconds, killOnIdleTimeout),
+      new ReaderInputStream(worker, writer, handle,
+        faultHandlerEnabled, idleTimeoutSeconds, killOnIdleTimeout),
       bufferSize))
     val stdoutIterator = newReaderIterator(
       dataIn, writer, startTime, env, worker, handle.map(_.pid.toInt), releasedOrClosed, context)
@@ -628,13 +670,6 @@ private[spark] abstract class BasePythonRunner[IN, OUT](
         logError("This may have been caused by a prior exception:", writer.exception.get)
         throw writer.exception.get
 
-      case e: IOException if faultHandlerEnabled && pid.isDefined &&
-          JavaFiles.exists(faultHandlerLogPath(pid.get)) =>
-        val path = faultHandlerLogPath(pid.get)
-        val error = String.join("\n", JavaFiles.readAllLines(path)) + "\n"
-        JavaFiles.deleteIfExists(path)
-        throw new SparkException(s"Python worker exited unexpectedly (crashed): $error", e)
-
       case e: IOException if !faultHandlerEnabled =>
         throw new SparkException(
           s"Python worker exited unexpectedly (crashed). " +
@@ -643,7 +678,11 @@ private[spark] abstract class BasePythonRunner[IN, OUT](
             "the better Python traceback.", e)
 
       case e: IOException =>
-        throw new SparkException("Python worker exited unexpectedly (crashed)", e)
+        val base = "Python worker exited unexpectedly (crashed)"
+        val msg = tryReadFaultHandlerLog(faultHandlerEnabled, pid)
+          .map(error => s"$base: $error")
+          .getOrElse(base)
+        throw new SparkException(msg, e)
     }
   }
 
@@ -701,6 +740,7 @@ private[spark] abstract class BasePythonRunner[IN, OUT](
       worker: PythonWorker,
       writer: Writer,
       handle: Option[ProcessHandle],
+      faultHandlerEnabled: Boolean,
       idleTimeoutSeconds: Long,
       killOnIdleTimeout: Boolean) extends InputStream {
     private[this] var writerIfbhThreadLocalValue: Object = null
@@ -836,6 +876,14 @@ private[spark] abstract class BasePythonRunner[IN, OUT](
             }
           }
         }
+      }
+      if (n == -1 && pythonWorkerKilled) {
+        val base = "Python worker process terminated due to idle timeout " +
+          s"(timeout: $idleTimeoutSeconds seconds)"
+        val msg = tryReadFaultHandlerLog(faultHandlerEnabled, handle.map(_.pid.toInt))
+          .map(error => s"$base: $error")
+          .getOrElse(base)
+        throw new PythonWorkerException(msg)
       }
       n
     }
@@ -987,6 +1035,12 @@ private[spark] class PythonRunner(
       }
     }
   }
+}
+
+class PythonWorkerException(msg: String, cause: Throwable)
+  extends SparkException(msg, cause) {
+
+  def this(msg: String) = this(msg, cause = null)
 }
 
 private[spark] object SpecialLengths {

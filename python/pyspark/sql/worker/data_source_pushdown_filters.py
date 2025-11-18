@@ -27,7 +27,8 @@ from typing import IO, Type, Union
 from pyspark.accumulators import _accumulatorRegistry
 from pyspark.errors import PySparkAssertionError, PySparkValueError
 from pyspark.errors.exceptions.base import PySparkNotImplementedError
-from pyspark.serializers import SpecialLengths, UTF8Deserializer, read_int, write_int
+from pyspark.logger.worker_io import capture_outputs
+from pyspark.serializers import SpecialLengths, UTF8Deserializer, read_int, read_bool, write_int
 from pyspark.sql.datasource import (
     DataSource,
     DataSourceReader,
@@ -140,6 +141,7 @@ def main(infile: IO, outfile: IO) -> None:
     filters are sent back to the JVM, along with the list of partitions and the read function.
     """
     faulthandler_log_path = os.environ.get("PYTHON_FAULTHANDLER_DIR", None)
+    tracebackDumpIntervalSeconds = os.environ.get("PYTHON_TRACEBACK_DUMP_INTERVAL_SECONDS", None)
     try:
         if faulthandler_log_path:
             faulthandler_log_path = os.path.join(faulthandler_log_path, str(os.getpid()))
@@ -147,6 +149,9 @@ def main(infile: IO, outfile: IO) -> None:
             faulthandler.enable(file=faulthandler_log_file)
 
         check_python_version(infile)
+
+        if tracebackDumpIntervalSeconds is not None and int(tracebackDumpIntervalSeconds) > 0:
+            faulthandler.dump_traceback_later(int(tracebackDumpIntervalSeconds), repeat=True)
 
         memory_limit_mb = int(os.environ.get("PYSPARK_PLANNER_MEMORY_MB", "-1"))
         setup_memory_limits(memory_limit_mb)
@@ -183,61 +188,64 @@ def main(infile: IO, outfile: IO) -> None:
                 },
             )
 
-        # Get the reader.
-        reader = data_source.reader(schema=schema)
-        # Validate the reader.
-        if not isinstance(reader, DataSourceReader):
-            raise PySparkAssertionError(
-                errorClass="DATA_SOURCE_TYPE_MISMATCH",
-                messageParameters={
-                    "expected": "an instance of DataSourceReader",
-                    "actual": f"'{type(reader).__name__}'",
-                },
+        with capture_outputs():
+            # Get the reader.
+            reader = data_source.reader(schema=schema)
+            # Validate the reader.
+            if not isinstance(reader, DataSourceReader):
+                raise PySparkAssertionError(
+                    errorClass="DATA_SOURCE_TYPE_MISMATCH",
+                    messageParameters={
+                        "expected": "an instance of DataSourceReader",
+                        "actual": f"'{type(reader).__name__}'",
+                    },
+                )
+
+            # Receive the pushdown filters.
+            json_str = utf8_deserializer.loads(infile)
+            filter_dicts = json.loads(json_str)
+            filters = [FilterRef(deserializeFilter(f)) for f in filter_dicts]
+
+            # Push down the filters and get the indices of the unsupported filters.
+            unsupported_filters = set(
+                FilterRef(f) for f in reader.pushFilters([ref.filter for ref in filters])
             )
+            supported_filter_indices = []
+            for i, filter in enumerate(filters):
+                if filter in unsupported_filters:
+                    unsupported_filters.remove(filter)
+                else:
+                    supported_filter_indices.append(i)
 
-        # Receive the pushdown filters.
-        json_str = utf8_deserializer.loads(infile)
-        filter_dicts = json.loads(json_str)
-        filters = [FilterRef(deserializeFilter(f)) for f in filter_dicts]
+            # If it returned any filters that are not in the original filters, raise an error.
+            if len(unsupported_filters) > 0:
+                raise PySparkValueError(
+                    errorClass="DATA_SOURCE_EXTRANEOUS_FILTERS",
+                    messageParameters={
+                        "type": type(reader).__name__,
+                        "input": str(list(filters)),
+                        "extraneous": str(list(unsupported_filters)),
+                    },
+                )
 
-        # Push down the filters and get the indices of the unsupported filters.
-        unsupported_filters = set(
-            FilterRef(f) for f in reader.pushFilters([ref.filter for ref in filters])
-        )
-        supported_filter_indices = []
-        for i, filter in enumerate(filters):
-            if filter in unsupported_filters:
-                unsupported_filters.remove(filter)
-            else:
-                supported_filter_indices.append(i)
-
-        # If it returned any filters that are not in the original filters, raise an error.
-        if len(unsupported_filters) > 0:
-            raise PySparkValueError(
-                errorClass="DATA_SOURCE_EXTRANEOUS_FILTERS",
-                messageParameters={
-                    "type": type(reader).__name__,
-                    "input": str(list(filters)),
-                    "extraneous": str(list(unsupported_filters)),
-                },
+            # Receive the max arrow batch size.
+            max_arrow_batch_size = read_int(infile)
+            assert max_arrow_batch_size > 0, (
+                "The maximum arrow batch size should be greater than 0, but got "
+                f"'{max_arrow_batch_size}'"
             )
+            binary_as_bytes = read_bool(infile)
 
-        # Receive the max arrow batch size.
-        max_arrow_batch_size = read_int(infile)
-        assert max_arrow_batch_size > 0, (
-            "The maximum arrow batch size should be greater than 0, but got "
-            f"'{max_arrow_batch_size}'"
-        )
-
-        # Return the read function and partitions. Doing this in the same worker as filter pushdown
-        # helps reduce the number of Python worker calls.
-        write_read_func_and_partitions(
-            outfile,
-            reader=reader,
-            data_source=data_source,
-            schema=schema,
-            max_arrow_batch_size=max_arrow_batch_size,
-        )
+            # Return the read function and partitions. Doing this in the same worker
+            # as filter pushdown helps reduce the number of Python worker calls.
+            write_read_func_and_partitions(
+                outfile,
+                reader=reader,
+                data_source=data_source,
+                schema=schema,
+                max_arrow_batch_size=max_arrow_batch_size,
+                binary_as_bytes=binary_as_bytes,
+            )
 
         # Return the supported filter indices.
         write_int(len(supported_filter_indices), outfile)
@@ -265,6 +273,9 @@ def main(infile: IO, outfile: IO) -> None:
         # write a different value to tell JVM to not reuse this worker
         write_int(SpecialLengths.END_OF_DATA_SECTION, outfile)
         sys.exit(-1)
+
+    # Force to cancel dump_traceback_later
+    faulthandler.cancel_dump_traceback_later()
 
 
 if __name__ == "__main__":

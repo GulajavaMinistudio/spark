@@ -30,7 +30,7 @@ import org.apache.spark.SparkException
 import org.apache.spark.scheduler._
 import org.apache.spark.sql.{Encoder, Row, SparkSession}
 import org.apache.spark.sql.connector.read.streaming.{Offset => OffsetV2, ReadLimit}
-import org.apache.spark.sql.execution.streaming._
+import org.apache.spark.sql.execution.streaming.runtime._
 import org.apache.spark.sql.internal.SQLConf
 import org.apache.spark.sql.streaming.StreamingQueryListener._
 import org.apache.spark.sql.streaming.ui.StreamingQueryStatusListener
@@ -63,7 +63,7 @@ class StreamingQueryListenerSuite extends StreamTest with BeforeAndAfter {
 
   private def testSingleListenerBasic(listener: EventCollector): Unit = {
     val clock = new StreamManualClock
-    val inputData = new MemoryStream[Int](0, sqlContext)
+    val inputData = new MemoryStream[Int](0, spark)
     val df = inputData.toDS().as[Long].map { 10 / _ }
 
     case class AssertStreamExecThreadToWaitForClock()
@@ -333,7 +333,7 @@ class StreamingQueryListenerSuite extends StreamTest with BeforeAndAfter {
       spark.streams.addListener(listener)
       try {
         var numTriggers = 0
-        val input = new MemoryStream[Int](0, sqlContext) {
+        val input = new MemoryStream[Int](0, spark) {
           override def latestOffset(startOffset: OffsetV2, limit: ReadLimit): OffsetV2 = {
             numTriggers += 1
             super.latestOffset(startOffset, limit)
@@ -375,7 +375,7 @@ class StreamingQueryListenerSuite extends StreamTest with BeforeAndAfter {
       collector.reset()
       session.sparkContext.addJobTag(jobTag1)
       session.sparkContext.addJobTag(jobTag2)
-      val mem = MemoryStream[Int](implicitly[Encoder[Int]], session.sqlContext)
+      val mem = MemoryStream[Int](implicitly[Encoder[Int]], session)
       testStream(mem.toDS())(
         AddData(mem, 1, 2, 3),
         CheckAnswer(1, 2, 3)
@@ -400,7 +400,7 @@ class StreamingQueryListenerSuite extends StreamTest with BeforeAndAfter {
     def runQuery(session: SparkSession): Unit = {
       collector1.reset()
       collector2.reset()
-      val mem = MemoryStream[Int](implicitly[Encoder[Int]], session.sqlContext)
+      val mem = MemoryStream[Int](implicitly[Encoder[Int]], session)
       testStream(mem.toDS())(
         AddData(mem, 1, 2, 3),
         CheckAnswer(1, 2, 3)
@@ -468,7 +468,7 @@ class StreamingQueryListenerSuite extends StreamTest with BeforeAndAfter {
   test("listener propagates observable metrics") {
     import org.apache.spark.sql.functions._
     val clock = new StreamManualClock
-    val inputData = new MemoryStream[Int](0, sqlContext)
+    val inputData = new MemoryStream[Int](0, spark)
     val df = inputData.toDF()
       .observe(
         name = "my_event",
@@ -564,7 +564,7 @@ class StreamingQueryListenerSuite extends StreamTest with BeforeAndAfter {
       }
 
       try {
-        val input = new MemoryStream[Int](0, sqlContext)
+        val input = new MemoryStream[Int](0, spark)
         val clock = new StreamManualClock()
         val result = input.toDF().select("value")
         testStream(result)(
