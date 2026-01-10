@@ -73,7 +73,7 @@ def to_arrow_type(
     dt: DataType,
     *,
     error_on_duplicated_field_names_in_struct: bool = False,
-    timestamp_utc: bool = True,
+    timezone: Optional[str] = None,
     prefers_large_types: bool = False,
 ) -> "pa.DataType":
     """
@@ -86,12 +86,8 @@ def to_arrow_type(
     error_on_duplicated_field_names_in_struct: bool, default False
         Whether to raise an exception when there are duplicated field names in a
         :class:`pyspark.sql.types.StructType`. (default ``False``)
-    timestamp_utc : bool, default True
-        If ``True`` (the default), :class:`TimestampType` is converted to a timezone-aware
-        :class:`pyarrow.TimestampType` with UTC as the timezone. If ``False``,
-        :class:`TimestampType` is converted to a timezone-naive :class:`pyarrow.TimestampType`.
-        The JVM expects timezone-aware timestamps to be in UTC. Always keep this set to ``True``
-        except in special cases, such as when this function is used in a test.
+    timezone : str, default None
+        timeZone required for TimestampType
 
     Returns
     -------
@@ -115,21 +111,15 @@ def to_arrow_type(
         arrow_type = pa.float64()
     elif type(dt) == DecimalType:
         arrow_type = pa.decimal128(dt.precision, dt.scale)
-    elif type(dt) == StringType and prefers_large_types:
-        arrow_type = pa.large_string()
     elif type(dt) == StringType:
-        arrow_type = pa.string()
-    elif type(dt) == BinaryType and prefers_large_types:
-        arrow_type = pa.large_binary()
+        arrow_type = pa.large_string() if prefers_large_types else pa.string()
     elif type(dt) == BinaryType:
-        arrow_type = pa.binary()
+        arrow_type = pa.large_binary() if prefers_large_types else pa.binary()
     elif type(dt) == DateType:
         arrow_type = pa.date32()
-    elif type(dt) == TimestampType and timestamp_utc:
-        # Timestamps should be in UTC, JVM Arrow timestamps require a timezone to be read
-        arrow_type = pa.timestamp("us", tz="UTC")
     elif type(dt) == TimestampType:
-        arrow_type = pa.timestamp("us", tz=None)
+        assert timezone is not None
+        arrow_type = pa.timestamp("us", tz=timezone)
     elif type(dt) == TimestampNTZType:
         arrow_type = pa.timestamp("us", tz=None)
     elif type(dt) == DayTimeIntervalType:
@@ -142,7 +132,7 @@ def to_arrow_type(
             to_arrow_type(
                 dt.elementType,
                 error_on_duplicated_field_names_in_struct=error_on_duplicated_field_names_in_struct,
-                timestamp_utc=timestamp_utc,
+                timezone=timezone,
                 prefers_large_types=prefers_large_types,
             ),
             nullable=dt.containsNull,
@@ -154,7 +144,7 @@ def to_arrow_type(
             to_arrow_type(
                 dt.keyType,
                 error_on_duplicated_field_names_in_struct=error_on_duplicated_field_names_in_struct,
-                timestamp_utc=timestamp_utc,
+                timezone=timezone,
                 prefers_large_types=prefers_large_types,
             ),
             nullable=False,
@@ -164,7 +154,7 @@ def to_arrow_type(
             to_arrow_type(
                 dt.valueType,
                 error_on_duplicated_field_names_in_struct=error_on_duplicated_field_names_in_struct,
-                timestamp_utc=timestamp_utc,
+                timezone=timezone,
                 prefers_large_types=prefers_large_types,
             ),
             nullable=dt.valueContainsNull,
@@ -183,7 +173,7 @@ def to_arrow_type(
                 to_arrow_type(
                     field.dataType,
                     error_on_duplicated_field_names_in_struct=error_on_duplicated_field_names_in_struct,
-                    timestamp_utc=timestamp_utc,
+                    timezone=timezone,
                     prefers_large_types=prefers_large_types,
                 ),
                 nullable=field.nullable,
@@ -197,7 +187,7 @@ def to_arrow_type(
         arrow_type = to_arrow_type(
             dt.sqlType(),
             error_on_duplicated_field_names_in_struct=error_on_duplicated_field_names_in_struct,
-            timestamp_utc=timestamp_utc,
+            timezone=timezone,
             prefers_large_types=prefers_large_types,
         )
     elif type(dt) == VariantType:
@@ -242,7 +232,7 @@ def to_arrow_schema(
     schema: StructType,
     *,
     error_on_duplicated_field_names_in_struct: bool = False,
-    timestamp_utc: bool = True,
+    timezone: Optional[str] = None,
     prefers_large_types: bool = False,
 ) -> "pa.Schema":
     """
@@ -255,12 +245,8 @@ def to_arrow_schema(
     error_on_duplicated_field_names_in_struct: bool, default False
         Whether to raise an exception when there are duplicated field names in an inner
         :class:`pyspark.sql.types.StructType`. (default ``False``)
-    timestamp_utc : bool, default True
-        If ``True`` (the default), :class:`TimestampType` is converted to a timezone-aware
-        :class:`pyarrow.TimestampType` with UTC as the timezone. If ``False``,
-        :class:`TimestampType` is converted to a timezone-naive :class:`pyarrow.TimestampType`.
-        The JVM expects timezone-aware timestamps to be in UTC. Always keep this set to ``True``
-        except in special cases, such as when this function is used in a test
+    timezone : str, default None
+        timeZone required for TimestampType
 
     Returns
     -------
@@ -274,7 +260,7 @@ def to_arrow_schema(
             to_arrow_type(
                 field.dataType,
                 error_on_duplicated_field_names_in_struct=error_on_duplicated_field_names_in_struct,
-                timestamp_utc=timestamp_utc,
+                timezone=timezone,
                 prefers_large_types=prefers_large_types,
             ),
             nullable=field.nullable,
@@ -856,6 +842,32 @@ def _to_corrected_pandas_type(dt: DataType) -> Optional[Any]:
         return None
 
 
+def _to_corrected_pandas_ext_type(dt: DataType) -> Optional[Any]:
+    """
+    Convert spark datatype to a Pandas extension type which support nullable data.
+    """
+    import pandas as pd
+
+    if isinstance(dt, ByteType):
+        return pd.Int8Dtype()
+    elif isinstance(dt, ShortType):
+        return pd.Int16Dtype()
+    elif isinstance(dt, IntegerType):
+        return pd.Int32Dtype()
+    elif isinstance(dt, LongType):
+        return pd.Int64Dtype()
+    elif isinstance(dt, FloatType):
+        return pd.Float32Dtype()
+    elif isinstance(dt, DoubleType):
+        return pd.Float64Dtype()
+    elif isinstance(dt, BooleanType):
+        return pd.BooleanDtype()
+    elif isinstance(dt, StringType):
+        return pd.StringDtype()
+    else:
+        return None
+
+
 @functools.lru_cache(maxsize=64)
 def _create_converter_to_pandas(
     data_type: DataType,
@@ -866,6 +878,7 @@ def _create_converter_to_pandas(
     error_on_duplicated_field_names: bool = True,
     timestamp_utc_localized: bool = True,
     ndarray_as_list: bool = False,
+    integer_object_nulls: bool = False,
 ) -> Callable[["pd.Series"], "pd.Series"]:
     """
     Create a converter of pandas Series that is created from Spark's Python objects,
@@ -894,6 +907,9 @@ def _create_converter_to_pandas(
         whereas the ones from `df.collect()` are localized to the local timezone.
     ndarray_as_list : bool, optional
         Whether `np.ndarray` is converted to a list or not (default ``False``).
+    integer_object_nulls : bool, optional
+        When True, means input series containing integers with nulls is cast to
+        objects. It is usually generated by pa.Array.to_pandas(integer_object_nulls=Ture).
 
     Returns
     -------
@@ -905,16 +921,17 @@ def _create_converter_to_pandas(
     pandas_type = _to_corrected_pandas_type(data_type)
 
     if pandas_type is not None:
-        # SPARK-21766: if an integer field is nullable and has null values, it can be
-        # inferred by pandas as a float column. If we convert the column with NaN back
-        # to integer type e.g., np.int16, we will hit an exception. So we use the
-        # pandas-inferred float type, rather than the corrected type from the schema
-        # in this case.
         if isinstance(data_type, IntegralType) and nullable:
+            if integer_object_nulls:
+                # pandas_type like np.int64 doesn't support nullable data
+                # use Pandas extension type instead
+                nullable_type = _to_corrected_pandas_ext_type(data_type)
+            else:
+                nullable_type = np.float64
 
             def correct_dtype(pser: pd.Series) -> pd.Series:
                 if pser.isnull().any():
-                    return pser.astype(np.float64, copy=False)
+                    return pser.astype(nullable_type, copy=False)
                 else:
                     return pser.astype(pandas_type, copy=False)
 
